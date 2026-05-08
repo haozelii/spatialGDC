@@ -1,1 +1,40 @@
-.history/
+# Python
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# R
+.RData
+.Rhistory
+
+# Large data directories
+dataset/
+exp/
+results/
+results_best/
+benchmarking/
+
+# CSV result files
+*.csv
+
+# Figures (generated)
+figures/
+
+# Logs
+seurat_log.txt
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

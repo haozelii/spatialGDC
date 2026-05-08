@@ -3,13 +3,14 @@ import numpy as np
 
 from .network import CCGCN, CCGCNs
 from tqdm import tqdm
-from .loss import ContrastiveLoss, ClusterLoss, MSELoss, IntersectionContrastiveLoss
+from .loss import ContrastiveLoss, ClusterLoss, MSELoss
 from .utils import sparse_mx_to_torch_sparse_tensor, adjust_learning_rate, fix_seed
 
 from sklearn.metrics import adjusted_rand_score
 
 
 class spCLUE:
+
     def __init__(
         self,
         input_data,
@@ -30,8 +31,6 @@ class spCLUE:
         beta=1,
         kappa=0.1,
         batch_train=False,
-        expr_keep_prob=None,  # 🌟 新增：接收预处理好的特征图保留概率
-        use_instance_cl=True, # 🌟 消融实验新增：实例级对比损失开关
     ):
         self.device = device
         self.learning_rate = learning_rate
@@ -47,8 +46,7 @@ class spCLUE:
         self.kappa = kappa
         self.dims_list = [dim_input, dim_hidden, dim_embed]
         self.n_spot = input_data.shape[0]
-        self.use_instance_cl = use_instance_cl # 🌟 绑定开关变量
-        
+
         fix_seed(self.random_seed)
         self.input_data = torch.FloatTensor(input_data).to(self.device)
         self.g_spatial = sparse_mx_to_torch_sparse_tensor(graph_dict["spatial"]).to(
@@ -57,12 +55,6 @@ class spCLUE:
         self.g_expr = sparse_mx_to_torch_sparse_tensor(graph_dict["expr"]).to(
             self.device
         )
-        
-        # 🌟 新增：将 Numpy 的概率数组转为 PyTorch Tensor 并放到 GPU 上
-        if expr_keep_prob is not None:
-            self.expr_keep_prob = torch.FloatTensor(expr_keep_prob).to(self.device)
-        else:
-            self.expr_keep_prob = None
 
         if batch_list is None:
             self.model = CCGCN(
@@ -90,37 +82,22 @@ class spCLUE:
         with torch.no_grad():
             self.model.eval()
             if batch_case:
-                # 🌟 修改：如果用到 batch_case，也最好把 x_rec 解包出来（虽然本次单切片可能跑不到这里）
-                _, _, feature_spa, feature_expr, features_fuse, _, _, x_rec = self.model(
-                    self.input_data, 
-                    self.g_spatial, 
-                    self.g_expr, 
-                    adj2_keep_prob=self.expr_keep_prob,
-                    batch_onehot=self.batchList
+                _, _, feature_spa, feature_expr, features_fuse, _, *_ = self.model(
+                    self.input_data, self.g_spatial, self.g_expr, self.batchList
                 )
                 features_fuse = features_fuse.detach().cpu().numpy()
                 return features_fuse
 
-            # 🌟 核心修改：非 batch 模式下，提取出第 8 个参数 x_rec
-            _, _, feature_spa, feature_expr, features_fuse, _, _, x_rec = self.model(
-                self.input_data, 
-                self.g_spatial, 
-                self.g_expr,
-                adj2_keep_prob=self.expr_keep_prob 
+            _, _, feature_spa, feature_expr, features_fuse, _, *_ = self.model(
+                self.input_data, self.g_spatial, self.g_expr
             )
             predLabel = self.model.getCluster(features_fuse)
             features_fuse = features_fuse.detach().cpu().numpy()
             predLabel = predLabel.detach().cpu().numpy()
-            
-            # 🌟 新增：把 x_rec 转成 numpy
-            x_rec = x_rec.detach().cpu().numpy()
-            
-            # 🌟 修改：返回三个值
-            return predLabel, features_fuse, x_rec
+            return predLabel, features_fuse
 
     def train(self):
-        # self.instance_crit = ContrastiveLoss()
-        self.instance_crit = IntersectionContrastiveLoss()
+        self.instance_crit = ContrastiveLoss()
         self.cluster_crit = ClusterLoss(self.n_clusters, self.device)
         self.rec_crit = MSELoss()
 
@@ -130,10 +107,6 @@ class spCLUE:
             weight_decay=self.weight_decay,
         )
         max_ari = 0.3 if self.n_spot <= 10000 else 1.1
-        # 🌟 新增：提前在 GPU 上将稀疏的邻接矩阵转化为稠密矩阵 (Dense)，供新 Loss 使用
-        # 放在循环外面算一次即可，节省显存和计算资源
-        adj_spatial_dense = self.g_spatial.to_dense()
-        adj_expr_dense = self.g_expr.to_dense()
         print("Training Start =========================>")
         for epoch in tqdm(range(self.epochs)):
             self.model.train()
@@ -149,28 +122,12 @@ class spCLUE:
                 predlabel1,
                 predlabel2,
                 x_rec,
-            ) = self.model(
-                self.input_data, 
-                self.g_spatial, 
-                self.g_expr,
-                adj2_keep_prob=self.expr_keep_prob # 🌟 修改：传入特征图保留概率
-            )
-            # 原实例级损失
-            # cur_contrastive_loss = (
-            #     self.instance_crit(output1, output2)
-            #     + self.instance_crit(output2, output1)
-            # ) / 2
-            # 🌟 消融实验核心拦截：是否计算实例级对比损失
-            if self.use_instance_cl:
-                cur_contrastive_loss = (
-                    self.instance_crit(output1, output2, adj_spatial_dense, adj_expr_dense)
-                    + self.instance_crit(output2, output1, adj_spatial_dense, adj_expr_dense)
-                ) / 2
-            else:
-                cur_contrastive_loss = torch.tensor(0.0).to(self.device)
-            
-            
-            
+            ) = self.model(self.input_data, self.g_spatial, self.g_expr)
+
+            cur_contrastive_loss = (
+                self.instance_crit(output1, output2)
+                + self.instance_crit(output2, output1)
+            ) / 2
             cur_cluster_loss = self.cluster_crit(predlabel1, predlabel2)
             cur_rec_expr_loss = self.rec_crit(x_rec, self.input_data)
 
@@ -188,29 +145,20 @@ class spCLUE:
                 cur_ari = adjusted_rand_score(predLabel1_np, predLabel2_np)
                 print(f"epoch {epoch + 1}: {cur_ari}")
                 if cur_ari >= max_ari:
-                    # 🌟 修改：接住 updateResult 吐出来的 3 个值
-                    predLabel, features_fuse, x_rec = self.updateResult()
-                    # 🌟 修改：返回 3 个值给最外层的 run_DLPFC.py
-                    return predLabel, features_fuse, x_rec
+                    predLabel, features_fuse = self.updateResult()
+                    return predLabel, features_fuse
 
         print("Training Finished =================<")
         with torch.no_grad():
             self.model.eval()
-            # 🌟 修改
-            _, _, feature_spa, feature_expr, features_fuse, _, _, x_rec = self.model(
-                self.input_data, 
-                self.g_spatial, 
-                self.g_expr,
-                adj2_keep_prob=self.expr_keep_prob # 🌟 新增
+            _, _, feature_spa, feature_expr, features_fuse, _, *_ = self.model(
+                self.input_data, self.g_spatial, self.g_expr
             )
             predLabel = self.model.getCluster(features_fuse)
             features_fuse = features_fuse.detach().cpu().numpy()
             predLabel = predLabel.detach().cpu().numpy()
-            
-            # 🌟 新增：安全转为 Numpy 数组释放显存
-            x_rec = x_rec.detach().cpu().numpy()
 
-        return predLabel, features_fuse, x_rec
+        return predLabel, features_fuse
 
     def trainBatch(self):
         self.instance_crit = ContrastiveLoss()
@@ -237,13 +185,7 @@ class spCLUE:
                 x_rec,
                 predlabel1,
                 predlabel2,
-            ) = self.model(
-                self.input_data, 
-                self.g_spatial, 
-                self.g_expr, 
-                adj2_keep_prob=self.expr_keep_prob, # 🌟 修改：显式传参
-                batch_onehot=self.batchList
-            )
+            ) = self.model(self.input_data, self.g_spatial, self.g_expr, self.batchList)
 
             cur_loss_id = self.loss_idx()
             cur_contrastive_loss = (
@@ -280,13 +222,8 @@ class spCLUE:
 
         with torch.no_grad():
             self.model.eval()
-            # 🌟 修改
             _, _, _, _, features_fuse, _, *_ = self.model(
-                self.input_data, 
-                self.g_spatial, 
-                self.g_expr, 
-                adj2_keep_prob=self.expr_keep_prob, # 🌟 新增
-                batch_onehot=self.batchList
+                self.input_data, self.g_spatial, self.g_expr, self.batchList
             )
             features_fuse = features_fuse.detach().cpu().numpy()
 

@@ -3,22 +3,6 @@ from torch import nn
 import math
 import torch.nn.functional as F
 
-class DisentangleLoss(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, z1_s, z2_s, z1_p, z2_p):
-
-        # ① shared 对齐（跨视图一致）
-        loss_align = F.mse_loss(z1_s, z2_s)
-
-        # ② 正交（核心）
-        loss_orth = (
-            (z1_s * z1_p).sum(dim=1).pow(2).mean() +
-            (z2_s * z2_p).sum(dim=1).pow(2).mean()
-        )
-
-        return loss_align + 0.1 * loss_orth
 
 class ContrastiveLoss(nn.Module):
     def __init__(self, temperature=0.2) -> None:
@@ -62,125 +46,32 @@ class ContrastiveLoss(nn.Module):
 #         # 5. 计算最终 Loss
 #         return -torch.log(posScores / (totalScores + eps)).mean()
 #剔除假负样本
-# class IntersectionContrastiveLoss(nn.Module):
-#     def __init__(self, temperature=0.2) -> None:
-#         super().__init__()
-#         self.temperature = temperature
-
-#     def forward(self, x, xbar, adj_spatial_dense, adj_expr_dense, eps=1e-8):
-#         """
-#         基于交集邻域的对比损失（修复版）
-        
-#         Args:
-#             x: [N, d] - 视图1的表示
-#             xbar: [N, d] - 视图2的表示
-#             adj_spatial_dense: [N, N] - 空间邻接矩阵（稠密）
-#             adj_expr_dense: [N, N] - 表达邻接矩阵（稠密）
-#             eps: 数值稳定性参数
-        
-#         Returns:
-#             loss: 标量损失值
-#         """
-#         # 1. 特征 L2 归一化
-#         x = F.normalize(x, p=2, dim=1)  # [N, d]
-#         xbar = F.normalize(xbar, p=2, dim=1)  # [N, d]
-        
-#         device = x.device
-#         N = x.shape[0]
-        
-#         # 2. 确保图矩阵是稠密的且维度正确
-#         if adj_spatial_dense.shape != (N, N):
-#             raise ValueError(
-#                 f"adj_spatial_dense shape {adj_spatial_dense.shape} != ({N}, {N})"
-#             )
-#         if adj_expr_dense.shape != (N, N):
-#             raise ValueError(
-#                 f"adj_expr_dense shape {adj_expr_dense.shape} != ({N}, {N})"
-#             )
-        
-#         # 3. 找到"假负样本"：空间和基因的交集邻域
-#         # 交集邻域 = (在空间图中相邻) AND (在表达图中相邻)
-#         intersection_mask = (adj_spatial_dense > 0) & (adj_expr_dense > 0)  # [N, N]
-        
-#         # 🚨 核心：绝对不能把对角线（自己/正样本）当成负样本
-#         intersection_mask.fill_diagonal_(False)
-        
-#         # 4. 计算相似度矩阵（避免数值溢出，使用 log-sum-exp 技巧）
-#         sim_matrix = (x @ xbar.T) / self.temperature  # [N, N]
-        
-#         # 5. 计算 InfoNCE 损失
-#         # 分子：正样本的相似度（自己对自己）
-#         pos_sim = (x * xbar).sum(dim=1) / self.temperature  # [N]
-#         pos_scores = torch.exp(pos_sim)  # [N]
-        
-#         # 分母：所有样本 - 假负样本（交集邻域）
-#         # 这里使用 logsumexp 的稳定形式
-#         sim_matrix_masked = sim_matrix.clone()
-#         sim_matrix_masked[intersection_mask] = float('-inf')  # 🌟 改进：使用 -inf 而不是 0
-        
-#         # 计算分母的对数（logsumexp）
-#         neg_scores_logsumexp = torch.logsumexp(sim_matrix_masked, dim=1)  # [N]
-        
-#         # 最终 loss：使用数值稳定的对数形式
-#         # log(pos / (pos + neg_without_hard)) = log(pos) - log(pos + neg)
-#         pos_log = torch.log(pos_scores + eps)
-#         denom_log = torch.logsumexp(
-#             torch.stack([pos_sim, neg_scores_logsumexp], dim=1), 
-#             dim=1
-#         )  # [N]
-        
-#         loss = -(pos_log - denom_log).mean()
-        
-#         return loss
-
-#假负样本排斥了减弱
 class IntersectionContrastiveLoss(nn.Module):
-    def __init__(self, temperature=0.2, fn_penalty=2.0) -> None:
+    def __init__(self, temperature=0.2) -> None:
         super().__init__()
         self.temperature = temperature
-        # 🌟 新增：软惩罚系数。值越大，对假负样本的排斥力越弱
-        # 如果 fn_penalty = 0，退化为普通 InfoNCE；如果你之前用 -inf，相当于 fn_penalty = 无穷大
-        self.fn_penalty = fn_penalty 
 
     def forward(self, x, xbar, adj_spatial_dense, adj_expr_dense, eps=1e-8):
-        x = F.normalize(x, p=2, dim=1)  
-        xbar = F.normalize(xbar, p=2, dim=1)  
+        # 1. 特征 L2 归一化
+        x = F.normalize(x, p=2, dim=1)
+        xbar = F.normalize(xbar, p=2, dim=1)
         
-        N = x.shape[0]
+        # 2. 找到“假负样本”：空间和基因双重邻居
+        intersection_mask = (adj_spatial_dense > 0) & (adj_expr_dense > 0)
         
-        # 1. 寻找交集邻域（潜在的假负样本）
-        intersection_mask = (adj_spatial_dense > 0) & (adj_expr_dense > 0) 
-        intersection_mask.fill_diagonal_(False)
+        # 3. 计算全局指数相似度矩阵
+        sim_matrix_exp = torch.exp((x @ xbar.T) / self.temperature)
         
-        # 2. 计算基础相似度矩阵
-        sim_matrix = (x @ xbar.T) / self.temperature  # [N, N]
+        # 4. 分子：只取“自己” (保持极强的个体判别性)
+        posScores = torch.exp((x * xbar).sum(dim=1) / self.temperature)
         
-        # 3. 计算正样本得分
-        pos_sim = (x * xbar).sum(dim=1) / self.temperature  
-        
-        # 4. 🌟 核心修改：软权重惩罚 (Soft Masking)
-        # 不再使用 -inf，而是将假负样本的相似度强行降低 fn_penalty 个 logit
-        # 这意味着在 exp() 之后，它们在分母中的比重会被缩小 exp(fn_penalty) 倍，但不会彻底消失！
-        sim_matrix_masked = sim_matrix.clone()
-        if self.fn_penalty > 0:
-            sim_matrix_masked[intersection_mask] = sim_matrix_masked[intersection_mask] - self.fn_penalty
-        
-        # 排除掉对角线（自己不是自己的负样本）
-        sim_matrix_masked.fill_diagonal_(float('-inf'))
-        
-        # 5. 计算分母的 logsumexp
-        neg_scores_logsumexp = torch.logsumexp(sim_matrix_masked, dim=1)  
+        # 5. 🎯 分母：剔除假负样本
+        # 使用 masked_fill 将交集邻居的相似度直接清零，彻底消除空间冲突
+        totalScores = sim_matrix_exp.masked_fill(intersection_mask, 0.0).sum(dim=1)
         
         # 6. 计算最终 Loss
-        pos_log = pos_sim # log(exp(pos_sim)) 就是 pos_sim
-        denom_log = torch.logsumexp(
-            torch.stack([pos_sim, neg_scores_logsumexp], dim=1), 
-            dim=1
-        )  
+        return -torch.log(posScores / (totalScores + eps)).mean()
         
-        loss = -(pos_log - denom_log).mean()
-        
-        return loss
 class ClusterLoss(nn.Module):
     def __init__(
             self,

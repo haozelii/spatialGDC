@@ -35,6 +35,7 @@ class AttentionBlock(nn.Module):
         return (beta * z).sum(1), beta
 
 
+
 class CCGCN(Module):
 
     def __init__(self, dims_list, n_clusters, graph_corr=0.4, dropout=0.5) -> None:
@@ -78,90 +79,35 @@ class CCGCN(Module):
             nn.Softmax(dim=1),
         )
 
-    # 🌟 新增：独立的方法来处理图的剪枝逻辑
-    # def get_dropped_adj(self, adj, custom_keep_prob=None):
-    #     if not self.training:
-    #         return adj
-            
-    #     # if custom_keep_prob is not None:
-    #     #     # 【核心创新】：空间先验引导的非均匀剪枝
-    #     #     mask = torch.bernoulli(custom_keep_prob).to(adj.device)
-    #     #     # PyTorch标准的Dropout会对保留下来的值进行数值缩放，我们也加上以稳定特征分布
-    #     #     scaled_values = adj._values() * mask / (custom_keep_prob + 1e-8)
-    #     #     return torch.sparse_coo_tensor(adj._indices(), scaled_values, size=adj.size())
-    #     # if custom_keep_prob is not None:
-    #     #     # 1. 正常抛硬币生成掩码
-    #     #     mask = torch.bernoulli(custom_keep_prob).to(adj.device)
-            
-    #     #     # 2. 🌟 核心修复：直接掩码，绝对不放大长程边的权重！
-    #     #     scaled_values = adj._values() * mask 
-            
-    #     #     return torch.sparse_coo_tensor(adj._indices(), scaled_values, size=adj.size())
-    #     if custom_keep_prob is not None:
-    #         # 1. 依然用空间先验概率进行“偏心抛硬币”，精准剪掉长程噪声边
-    #         mask = torch.bernoulli(custom_keep_prob).to(adj.device)
-            
-    #         # 2. 🌟 终极修复：计算整个图的“全局平均保留率”
-    #         global_keep_ratio = custom_keep_prob.mean()
-            
-    #         # 3. 🌟 终极修复：用全局保留率进行统一缩放！
-    #         # 这样既补偿了因为砍边导致的整体信号流失，又绝不会破坏局部邻居之间的相对权重！
-    #         scaled_values = (adj._values() * mask) / (global_keep_ratio + 1e-8)
-            
-    #         return torch.sparse_coo_tensor(adj._indices(), scaled_values, size=adj.size())    
-    #     else:
-    #         # 【原始逻辑】：均匀随机剪枝 (用于空间图)
-    #         dropped_values = F.dropout(adj._values(), p=self.graph_corr, training=True)
-    #         return torch.sparse_coo_tensor(adj._indices(), dropped_values, size=adj.size())
-    def get_dropped_adj(self, adj, custom_keep_prob=None):
-        if not self.training:
-            return adj
-            
-        if custom_keep_prob is not None:
-            mask = torch.bernoulli(custom_keep_prob).to(adj.device)
-            # 🌟 因为 custom_keep_prob 最低是 0.5，这里的最大放大倍数只有 2 倍，绝对安全！
-            scaled_values = adj._values() * mask / custom_keep_prob
-            return torch.sparse_coo_tensor(adj._indices(), scaled_values, size=adj.size())
-        else:
-            dropped_values = F.dropout(adj._values(), p=self.graph_corr, training=True)
-            return torch.sparse_coo_tensor(adj._indices(), dropped_values, size=adj.size())
-    # 🌟 修改：加入 custom_keep_prob 参数，并替换掉原来生硬的 dropout
-    def encoder(self, data, adj, custom_keep_prob=None):
+    def encoder(self, data, adj):
         feature = self.noiseLayer(data)
-        
-        adj1_dropped = self.get_dropped_adj(adj, custom_keep_prob)
-        feature = self.act(torch.spmm(adj1_dropped, self.Transform1(feature)))
-        
-        adj2_dropped = self.get_dropped_adj(adj, custom_keep_prob)
-        feature = self.act(torch.spmm(adj2_dropped, self.Transform2(feature)))
-        
+        adj1 = torch.sparse_coo_tensor(
+            adj._indices(),
+            F.dropout(adj._values(), p=self.graph_corr, training=self.training),
+            size=adj.size(),
+        )
+        feature = self.act(torch.spmm(adj1, self.Transform1(feature)))
+        adj2 = torch.sparse_coo_tensor(
+            adj._indices(),
+            F.dropout(adj._values(), p=self.graph_corr, training=self.training),
+            size=adj.size(),
+        )
+        feature = self.act(torch.spmm(adj2, self.Transform2(feature)))
         return feature
 
     def getCluster(self, embed):
         labels = self.projectClsHead(embed)
         return torch.argmax(labels, dim=1)
 
-    # 🌟 修改：增加 adj2_keep_prob 参数
-    # 🌟 修改：增加 adj2_keep_prob 参数，以及消融实验开关 use_spatial_drop
-    def forward(self, data, adj1, adj2, adj2_keep_prob=None, use_spatial_drop=True, batch_onehot=None):
+    def forward(self, data, adj1, adj2, batch_onehot=None):
         """
         Args:
             data (torch.FloatTensor): pca input of gene expression data.
             adj1 (torch.sparse_coo_tensor): normalized spatial graph.
             adj2 (torch.sparse_coo_tensor): normalized expr graph.
-            adj2_keep_prob: 🌟 空间先验保留概率
-            use_spatial_drop: 🌟 消融实验开关，为 False 时退化为普通均匀随机丢边
         """
-        # 🌟 核心消融逻辑：如果不使用空间指导，就强制把概率矩阵设为 None
-        actual_keep_prob = adj2_keep_prob if use_spatial_drop else None
-
-        # 🌟 空间图永远不传 custom_prob，走均匀随机丢边
-        feature1 = self.encoder(data, adj1, custom_keep_prob=None)
-        
-        # 🌟 特征图根据开关决定：
-        # 如果 actual_keep_prob 有值 -> 走你的偏心剪枝 (Full Model)
-        # 如果 actual_keep_prob 是 None -> 退化走 get_dropped_adj 里的 else 分支 (随机 dropout)
-        feature2 = self.encoder(data, adj2, custom_keep_prob=actual_keep_prob)
+        feature1 = self.encoder(data, adj1)
+        feature2 = self.encoder(data, adj2)
 
         # + L2 normalization
         z1_norm = normalize(feature1, p=2, dim=1)
@@ -242,52 +188,38 @@ class CCGCNs(Module):
             nn.Softmax(dim=1),
         )
 
-    # 🌟 新增：同样为 Batch 版本加上剪枝处理方法
-    def get_dropped_adj(self, adj, custom_keep_prob=None):
-        if not self.training:
-            return adj
-            
-        if custom_keep_prob is not None:
-            mask = torch.bernoulli(custom_keep_prob).to(adj.device)
-            scaled_values = adj._values() * mask / (custom_keep_prob + 1e-8)
-            return torch.sparse_coo_tensor(adj._indices(), scaled_values, size=adj.size())
-        else:
-            dropped_values = F.dropout(adj._values(), p=self.graph_corr, training=True)
-            return torch.sparse_coo_tensor(adj._indices(), dropped_values, size=adj.size())
-
-    # 🌟 修改
-    def encoder(self, data, adj, custom_keep_prob=None):
+    def encoder(self, data, adj):
         feature = self.noiseLayer(data)
-        
-        adj1_dropped = self.get_dropped_adj(adj, custom_keep_prob)
-        feature = self.act(torch.spmm(adj1_dropped, self.Transform1(feature)))
-        
-        adj2_dropped = self.get_dropped_adj(adj, custom_keep_prob)
-        feature = self.act(torch.spmm(adj2_dropped, self.Transform2(feature)))
-        
+        adj1 = torch.sparse_coo_tensor(
+            adj._indices(),
+            F.dropout(adj._values(), p=self.graph_corr, training=self.training),
+            size=adj.size(),
+        )
+        feature = self.act(torch.spmm(adj1, self.Transform1(feature)))
+        adj2 = torch.sparse_coo_tensor(
+            adj._indices(),
+            F.dropout(adj._values(), p=self.graph_corr, training=self.training),
+            size=adj.size(),
+        )
+        feature = self.act(torch.spmm(adj2, self.Transform2(feature)))
         return feature
 
     def getCluster(self, embed):
         labels = self.projectClsHead(embed)
         return torch.argmax(labels, dim=1)
 
-    # 🌟 修改：加入 adj2_keep_prob 和统一 batch_onehot 参数名称
-    def forward(self, data, adj1, adj2, adj2_keep_prob=None, batch_onehot=None):
+    def forward(self, data, adj1, adj2, batch_list=None):
         """
         Args:
             data (torch.FloatTensor): pca input of the gene expression data.
             adj1 (torch.sparse_coo_tensor): normalized spatial graph.
             adj2 (torch.sparse_coo_tensor): normalized expr graph.
-            adj2_keep_prob: 🌟 空间先验保留概率
-            batch_onehot: list of batch ID (原为 batch_list).
+            batch_list (): list of batch ID.
         """
-        batch_list = batch_onehot # 兼容内部变量名
         batch_noise = self.batchPortion[batch_list] @ self.batchPCA
         data = data - self.weightBatch * batch_noise 
-        
-        # 🌟 核心：空间先验特征图单独用自适应dropout
-        feature1 = self.encoder(data, adj1, custom_keep_prob=None)
-        feature2 = self.encoder(data, adj2, custom_keep_prob=adj2_keep_prob)
+        feature1 = self.encoder(data, adj1)
+        feature2 = self.encoder(data, adj2)
 
         # + L2 normalization
         z1_norm = normalize(feature1, p=2, dim=1)
