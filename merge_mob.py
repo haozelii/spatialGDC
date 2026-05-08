@@ -2,7 +2,7 @@ import pandas as pd
 import scanpy as sc
 import os
 
-base_dir = "/home/bio/lhz/spCLUE/dataset/Mouse_OB/"
+base_dir = "/home/bio/lhz/spatialGDC/dataset/Mouse_OB/"
 sub_dir = os.path.join(base_dir, "Dataset1_LiuLongQi_MouseOlfactoryBulb")
 
 print("📂 正在读取表达矩阵与坐标...")

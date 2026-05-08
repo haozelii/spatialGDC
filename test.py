@@ -20,7 +20,7 @@ os.environ["R_HOME"] = "/home/bio/miniconda3/envs/spCLUE/lib/R"
 warnings.filterwarnings("ignore")
 
 # 2. 导入 spCLUE 
-spCLUE_ROOT_PATH = "/home/bio/lhz/spCLUE"
+spCLUE_ROOT_PATH = "/home/bio/lhz/spatialGDC"
 if spCLUE_ROOT_PATH not in sys.path:
     sys.path.append(spCLUE_ROOT_PATH)
 import spCLUE

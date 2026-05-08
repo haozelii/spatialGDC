@@ -16,7 +16,7 @@ warnings.filterwarnings("ignore")
 # 0. 环境与路径配置 (直接从你的 Jupyter Cell 1 搬过来的，非常关键！)
 # =========================================================================
 os.environ["R_HOME"] = "/home/bio/miniconda3/envs/spCLUE/lib/R"
-spCLUE_ROOT_PATH = "/home/bio/lhz/spCLUE"
+spCLUE_ROOT_PATH = "/home/bio/lhz/spatialGDC"
 sys.path.append(spCLUE_ROOT_PATH)
 
 import spCLUE

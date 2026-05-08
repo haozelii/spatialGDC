@@ -10,7 +10,7 @@ import torch
 from sklearn.metrics import adjusted_rand_score
 import argparse
 
-spCLUE_ROOT_PATH = "/home/bio/lhz/spCLUE"
+spCLUE_ROOT_PATH = "/home/bio/lhz/spatialGDC"
 if spCLUE_ROOT_PATH not in sys.path:
     sys.path.append(spCLUE_ROOT_PATH)
 import spCLUE
@@ -20,8 +20,8 @@ warnings.filterwarnings("ignore")
 # ==========================================
 # 1. 实验核心配置
 # ==========================================
-DLPFC_DIR = "/home/bio/lhz/spCLUE/dataset/DLPFC/"
-BRCA_DIR = "/home/bio/lhz/spCLUE/dataset/BRCA1/"
+DLPFC_DIR = "/home/bio/lhz/spatialGDC/dataset/DLPFC/"
+BRCA_DIR = "/home/bio/lhz/spatialGDC/dataset/BRCA1/"
 
 dlpfc_samples = ["151507", "151508", "151509", "151510", "151669", "151670", "151671", "151672", "151673", "151674", "151675", "151676"]
 brca_samples = ["V1_Human_Breast_Cancer_Block_A_Section_1"]
