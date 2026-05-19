@@ -50,9 +50,9 @@ adata_raw.var_names_make_unique()
 meta_df = pd.read_csv(meta_path, sep='\t', index_col=0)
 adata_raw.obs = adata_raw.obs.join(meta_df, how='left')
 
-# BRCA 使用 annot_type 作为 ground truth，共 4 类
-gt_col = 'annot_type'
-n_clusters = adata_raw.obs[gt_col].nunique()
+# BRCA 使用 fine_annot_type 作为 ground truth (与 baselines 一致，共 ~21 类)
+gt_col = 'fine_annot_type'
+n_clusters = adata_raw.obs[gt_col].dropna().nunique()
 print(f"✅ 数据加载完成: {adata_raw.shape[0]} spots, {n_clusters} 个聚类 (标注列: {gt_col})")
 print(f"   类别分布:\n{adata_raw.obs[gt_col].value_counts().to_string()}")
 

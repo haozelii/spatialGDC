@@ -28,7 +28,7 @@ brca_samples = ["V1_Human_Breast_Cancer_Block_A_Section_1"]
 
 # 定义对标论文的 4 个消融变体
 ablation_modes = [
-    "spCLUE",              # 满血版
+    "spatialGDC",              # 满血版
     "w/o Dual-graph",      # 去掉双图融合 (用单图)
     "w/o Instance-CL",     # 去掉实例级对比
     "w/o Spatial-guide"    # 去掉空间引导丢边

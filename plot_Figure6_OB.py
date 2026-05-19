@@ -42,19 +42,20 @@ print("🏷️ 正在将数字簇映射为小鼠嗅球解剖学标签...")
 # ⚠️ 注意：这是一个默认的映射字典。
 # 当你画出图后，你需要对照 Panel C/D 的基因表达结果，将真实的数字与标签对应起来并修改这里！
 cluster2name = {
-    '0': 'ONL_1', '1': 'ONL_2',
-    '2': 'GL_1',  '3': 'GL_2',
-    '4': 'EPL',
-    '5': 'MCL_1', '6': 'MCL_2',
-    '7': 'IPL_1', '8': 'IPL_2',
-    '9': 'GCL_1', '10': 'GCL_2'
+    # Evidence-based mapping from 8 marker genes + spatial position
+    # Gabra1->GL, Slc6a11->EPL, Mbp->MCL, Atp2b4->GCL, Pcp4->ONL, Nrgn->IPL, Cck->EPLi, Kctd12->GL/EPL
+    '0': 'ONL',  '6': 'ONL',       # Pcp4=2.10(ONL), peripheral
+    '10': 'GL',  '4': 'GL', '5': 'GL',  # Gabra1=1.12(GL), Kctd12=0.77(GL/EPL)
+    '3': 'EPL',  '8': 'EPL', '9': 'EPL', '7': 'EPL',  # Cck, Slc6a11 (EPL)
+    '2': 'MCL',                    # Mbp=0.93(MCL)
+    '1': 'GCL',                    # Nrgn=0.67, Atp2b4=0.23, innermost core
 }
 
 # 替换数字为文本标签
 adata.obs['domain'] = adata.obs['domain'].map(lambda x: cluster2name.get(x, f"Cluster_{x}"))
 
 # 规范化分类顺序（从外层到内层），确保图例排版学术且美观
-category_order = ['ONL_1', 'ONL_2', 'GL_1', 'GL_2', 'EPL', 'MCL_1', 'MCL_2', 'IPL_1', 'IPL_2', 'GCL_1', 'GCL_2', 'RMS']
+category_order = ['ONL', 'GL', 'EPL', 'MCL', 'GCL', 'RMS']
 existing_cats = [cat for cat in category_order if cat in adata.obs['domain'].unique()]
 # 补充未匹配的数字簇
 for cat in np.unique(adata.obs['domain']):
