@@ -1,18 +1,19 @@
 """
-4-View R7 Dual-Graph Contrastive GCN — PROVEN CONFIG
-======================================================
-V1: spatial + NoiseLayer + DropEdge(0.4) — independent random
-V2: spatial + NoiseLayer + DropEdge(0.4) — independent random  
-V3: expr   + NoiseLayer + Spatial-Prior DropEdge — Innovation 1
-V4: expr   + NoiseLayer + DropEdge(0.4) — independent random
+4-View 2-Original + 2-Augmented Dual-Graph CGCN
+=================================================
+V1: spatial 原始 (NoiseLayer YES, DropEdge NO)  — preserve topology
+V2: expr   原始 (NoiseLayer YES, DropEdge NO)  — preserve topology
+V3: spatial 增强 (NoiseLayer YES, DropEdge 0.4) — perturb topology
+V4: expr   增强 (NoiseLayer YES, SP-DropEdge)   — Innovation 1
 
-CL Pair 1: V1 ↔ V3 (primary cross-topo)
-CL Pair 2: V2 ↔ V4 (auxiliary cross-topo)
-ICL soft penalty on all pairs ← Innovation 2
+CL Pair1 (cross-topo): V1(orig_spa) ↔ V4(aug_expr_SP)  — Innovation pairing
+CL Pair2 (cross-topo): V3(aug_spa)  ↔ V2(orig_expr)    — Standard pairing
+CL Pair3 (same-topo):  V1(orig_spa) ↔ V3(aug_spa)      — Aug invariance
+CL Pair4 (same-topo):  V2(orig_expr)↔ V4(aug_expr)     — Aug invariance
+
+kappa budget: cross-topo 0.03×2 + same-topo 0.02×2 = 0.10 total
 4-way Attention fusion
-Reconstruction: relu(z@W2.T) @ W1.T (2-step with intermediate activation)
-
-CRITICAL: kappa=0.05 per pair (total=0.1, matches 2-view)
+Reconstruction: relu(z@W2.T) @ W1.T (2-step)
 """
 
 import torch
@@ -93,11 +94,24 @@ class CCGCN(Module):
             dropped_values = F.dropout(adj._values(), p=self.graph_corr, training=True)
             return torch.sparse_coo_tensor(adj._indices(), dropped_values, size=adj.size())
 
-    def encoder(self, data, adj, custom_keep_prob=None):
+    def encoder(self, data, adj, custom_keep_prob=None, drop_edge=True):
+        """
+        drop_edge=True:  NoiseLayer + DropEdge (增强view)
+        drop_edge=False: NoiseLayer only, no DropEdge (原始view, preserve topology)
+        """
+        # Always apply NoiseLayer (feature noise is essential for CL)
         feature = self.noiseLayer(data)
-        adj1_dropped = self.get_dropped_adj(adj, custom_keep_prob)
+        
+        if drop_edge:
+            adj1_dropped = self.get_dropped_adj(adj, custom_keep_prob)
+        else:
+            adj1_dropped = adj
         feature = self.act(torch.spmm(adj1_dropped, self.Transform1(feature)))
-        adj2_dropped = self.get_dropped_adj(adj, custom_keep_prob)
+
+        if drop_edge:
+            adj2_dropped = self.get_dropped_adj(adj, custom_keep_prob)
+        else:
+            adj2_dropped = adj
         feature = self.act(torch.spmm(adj2_dropped, self.Transform2(feature)))
         return feature
 
@@ -108,11 +122,13 @@ class CCGCN(Module):
     def forward(self, data, adj1, adj2, adj2_keep_prob=None, use_spatial_drop=True, batch_onehot=None):
         actual_keep_prob = adj2_keep_prob if use_spatial_drop else None
 
-        # 4 independent encoder passes
-        z1 = self.encoder(data, adj1, custom_keep_prob=None)
-        z2 = self.encoder(data, adj1, custom_keep_prob=None)
-        z3 = self.encoder(data, adj2, custom_keep_prob=actual_keep_prob)
-        z4 = self.encoder(data, adj2, custom_keep_prob=None)
+        # ── 2 原始 view (NoiseLayer YES, DropEdge NO) ──
+        z1 = self.encoder(data, adj1, drop_edge=False)          # V1: spatial 原始
+        z2 = self.encoder(data, adj2, drop_edge=False)          # V2: expr 原始
+
+        # ── 2 增强 view (NoiseLayer YES, DropEdge YES) ──
+        z3 = self.encoder(data, adj1, drop_edge=True)           # V3: spatial 增强
+        z4 = self.encoder(data, adj2, custom_keep_prob=actual_keep_prob, drop_edge=True)  # V4: expr 增强(SP)
 
         z1_norm = normalize(z1, p=2, dim=1)
         z2_norm = normalize(z2, p=2, dim=1)
@@ -135,7 +151,7 @@ class CCGCN(Module):
         # 2-step reconstruction with intermediate ReLU (CRITICAL)
         x_Rec = self.relu(z_fuse @ self.Transform2.W.data.T) @ self.Transform1.W.data.T
 
-        return h1_norm, h2_norm, h3_norm, h4_norm, z_fuse, label1, label3, label2, label4, x_Rec
+        return h1_norm, h2_norm, h3_norm, h4_norm, z_fuse, label1, label2, label3, label4, x_Rec
 
 
 class CCGCNs(Module):
@@ -205,11 +221,17 @@ class CCGCNs(Module):
             dropped_values = F.dropout(adj._values(), p=self.graph_corr, training=True)
             return torch.sparse_coo_tensor(adj._indices(), dropped_values, size=adj.size())
 
-    def encoder(self, data, adj, custom_keep_prob=None):
+    def encoder(self, data, adj, custom_keep_prob=None, drop_edge=True):
         feature = self.noiseLayer(data)
-        adj1_dropped = self.get_dropped_adj(adj, custom_keep_prob)
+        if drop_edge:
+            adj1_dropped = self.get_dropped_adj(adj, custom_keep_prob)
+        else:
+            adj1_dropped = adj
         feature = self.act(torch.spmm(adj1_dropped, self.Transform1(feature)))
-        adj2_dropped = self.get_dropped_adj(adj, custom_keep_prob)
+        if drop_edge:
+            adj2_dropped = self.get_dropped_adj(adj, custom_keep_prob)
+        else:
+            adj2_dropped = adj
         feature = self.act(torch.spmm(adj2_dropped, self.Transform2(feature)))
         return feature
 
@@ -222,10 +244,11 @@ class CCGCNs(Module):
         batch_noise = self.batchPortion[batch_list] @ self.batchPCA
         data = data - self.weightBatch * batch_noise
 
-        z1 = self.encoder(data, adj1, custom_keep_prob=None)
-        z2 = self.encoder(data, adj1, custom_keep_prob=None)
-        z3 = self.encoder(data, adj2, custom_keep_prob=adj2_keep_prob)
-        z4 = self.encoder(data, adj2, custom_keep_prob=None)
+        # 2 original + 2 augmented
+        z1 = self.encoder(data, adj1, drop_edge=False)
+        z2 = self.encoder(data, adj2, drop_edge=False)
+        z3 = self.encoder(data, adj1, drop_edge=True)
+        z4 = self.encoder(data, adj2, custom_keep_prob=adj2_keep_prob, drop_edge=True)
 
         z1_norm = normalize(z1, p=2, dim=1)
         z2_norm = normalize(z2, p=2, dim=1)
@@ -250,7 +273,7 @@ class CCGCNs(Module):
 
         x_Rec = self.relu(z_dec @ self.Transform2.W.data.T) @ self.Transform1.W.data.T
 
-        return h1_norm, h2_norm, h3_norm, h4_norm, z_fuse, label1, label3, label2, label4, x_Rec
+        return h1_norm, h2_norm, h3_norm, h4_norm, z_fuse, label1, label2, label3, label4, x_Rec
 
 
 class InnerProductDec(nn.Module):

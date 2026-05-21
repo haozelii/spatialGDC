@@ -1,10 +1,19 @@
 """
-4-View R7 Training Loop — PROVEN CONFIG (kappa=0.05/pair)
-==========================================================
-V1(spatial) <-> V3(expr+sp_prior) : primary cross-topo
-V2(spatial) <-> V4(expr+uniform) : auxiliary cross-topo
-ICL soft penalty on both pairs <- Innovation 2
-CRITICAL: kappa=0.05 per pair (total=0.1, matches 2-view)
+4-View 2-Orig + 2-Aug Training Loop
+====================================
+V1=orig_spa(NoiseLayer), V2=orig_expr(NoiseLayer)
+V3=aug_spa(NoiseLayer+DropEdge), V4=aug_expr(NoiseLayer+SP-DropEdge)
+
+4 CL pairs with kappa budget = 0.10 total:
+  Cross-topo (κ=0.03×2=0.06):
+    Pair1: V1(orig_spa) ↔ V4(aug_expr_SP)  — Innovation
+    Pair2: V3(aug_spa)  ↔ V2(orig_expr)    — Standard
+  Same-topo augmentation invariance (κ=0.02×2=0.04):
+    Pair3: V1(orig_spa) ↔ V3(aug_spa)      — Spa aug invariance
+    Pair4: V2(orig_expr)↔ V4(aug_expr)     — Expr aug invariance
+
+Cluster CL: cross-topo only (V1↔V2, V3↔V4)
+ICL soft penalty ← Innovation 2
 """
 
 import torch
@@ -52,7 +61,9 @@ class spCLUE:
         self.graph_corr = graph_corr
         self.gamma = gamma
         self.beta = beta
-        self.kappa = kappa / 2.0  # CRITICAL: halved for 2 CL pairs
+        # Kappa budget: cross-topo 0.03×2 + same-topo 0.02×2 = 0.10
+        self.kappa_cross = 0.03   # per cross-topo pair
+        self.kappa_same = 0.02    # per same-topo pair
         self.dims_list = [dim_input, dim_hidden, dim_embed]
         self.n_spot = input_data.shape[0]
         self.use_instance_cl = use_instance_cl
@@ -142,7 +153,7 @@ class spCLUE:
             (
                 h1, h2, h3, h4,
                 output_fuse,
-                label1, label3, label2, label4,
+                label1, label2, label3, label4,
                 x_rec,
             ) = self.model(
                 self.input_data, 
@@ -151,7 +162,18 @@ class spCLUE:
                 adj2_keep_prob=self.expr_keep_prob
             )
             
+            # V1=orig_spa, V2=orig_expr, V3=aug_spa, V4=aug_expr(SP)
             if self.use_instance_cl:
+                # Cross-topo pairs (Innovation + standard)
+                ic_14 = (
+                    self.instance_crit(h1, h4, adj_spatial_dense, adj_expr_dense)
+                    + self.instance_crit(h4, h1, adj_spatial_dense, adj_expr_dense)
+                ) / 2
+                ic_32 = (
+                    self.instance_crit(h3, h2, adj_spatial_dense, adj_expr_dense)
+                    + self.instance_crit(h2, h3, adj_spatial_dense, adj_expr_dense)
+                ) / 2
+                # Same-topo augmentation invariance
                 ic_13 = (
                     self.instance_crit(h1, h3, adj_spatial_dense, adj_expr_dense)
                     + self.instance_crit(h3, h1, adj_spatial_dense, adj_expr_dense)
@@ -160,15 +182,22 @@ class spCLUE:
                     self.instance_crit(h2, h4, adj_spatial_dense, adj_expr_dense)
                     + self.instance_crit(h4, h2, adj_spatial_dense, adj_expr_dense)
                 ) / 2
-                cur_contrastive_loss = ic_13 + ic_24
+                cur_contrastive_loss = (
+                    self.kappa_cross * (ic_14 + ic_32) 
+                    + self.kappa_same * (ic_13 + ic_24)
+                )
             else:
                 cur_contrastive_loss = torch.tensor(0.0).to(self.device)
             
-            cur_cluster_loss = self.cluster_crit(label1, label3) + self.cluster_crit(label2, label4)
+            # Cluster CL: cross-topo (orig↔orig) + (aug↔aug)
+            cur_cluster_loss = (
+                self.cluster_crit(label1, label2)    # orig_spa ↔ orig_expr
+                + self.cluster_crit(label3, label4)  # aug_spa ↔ aug_expr
+            )
             cur_rec_expr_loss = self.rec_crit(x_rec, self.input_data)
 
             cur_batch_loss = (
-                self.kappa * cur_contrastive_loss
+                cur_contrastive_loss
                 + self.beta * cur_cluster_loss
                 + self.gamma * cur_rec_expr_loss
             )
@@ -177,8 +206,8 @@ class spCLUE:
             
             if (epoch + 1) % 100 == 0:
                 predLabel1_np = label1.detach().cpu().numpy().argmax(axis=1)
-                predLabel3_np = label3.detach().cpu().numpy().argmax(axis=1)
-                cur_ari = adjusted_rand_score(predLabel1_np, predLabel3_np)
+                predLabel2_np = label2.detach().cpu().numpy().argmax(axis=1)
+                cur_ari = adjusted_rand_score(predLabel1_np, predLabel2_np)
                 print(f"epoch {epoch + 1}: cross-topo ARI = {cur_ari:.4f}")
                 if cur_ari >= max_ari:
                     predLabel, features_fuse, x_rec = self.updateResult()
@@ -219,7 +248,7 @@ class spCLUE:
             (
                 h1, h2, h3, h4,
                 output_fuse,
-                label1, label3, label2, label4,
+                label1, label2, label3, label4,
                 x_rec,
             ) = self.model(
                 self.input_data, 
@@ -231,23 +260,32 @@ class spCLUE:
 
             cur_loss_id = self.loss_idx()
             
+            # Cross-topo + same-topo CL
             cur_contrastive_loss = (
-                self.instance_crit(h1[cur_loss_id], h3[cur_loss_id])
-                + self.instance_crit(h3[cur_loss_id], h1[cur_loss_id])
-                + self.instance_crit(h2[cur_loss_id], h4[cur_loss_id])
-                + self.instance_crit(h4[cur_loss_id], h2[cur_loss_id])
-            ) / 4
+                self.kappa_cross * (
+                    self.instance_crit(h1[cur_loss_id], h4[cur_loss_id])
+                    + self.instance_crit(h4[cur_loss_id], h1[cur_loss_id])
+                    + self.instance_crit(h3[cur_loss_id], h2[cur_loss_id])
+                    + self.instance_crit(h2[cur_loss_id], h3[cur_loss_id])
+                ) / 4
+                + self.kappa_same * (
+                    self.instance_crit(h1[cur_loss_id], h3[cur_loss_id])
+                    + self.instance_crit(h3[cur_loss_id], h1[cur_loss_id])
+                    + self.instance_crit(h2[cur_loss_id], h4[cur_loss_id])
+                    + self.instance_crit(h4[cur_loss_id], h2[cur_loss_id])
+                ) / 4
+            )
             
             cur_cluster_loss = self.cluster_crit(
-                label1[cur_loss_id], label3[cur_loss_id]
+                label1[cur_loss_id], label2[cur_loss_id]
             ) + self.cluster_crit(
-                label2[cur_loss_id], label4[cur_loss_id]
+                label3[cur_loss_id], label4[cur_loss_id]
             )
             
             cur_rec_expr_loss = self.rec_crit(x_rec, self.input_data)
 
             cur_batch_loss = (
-                self.kappa * cur_contrastive_loss
+                cur_contrastive_loss
                 + self.gamma * cur_rec_expr_loss
                 + self.beta * cur_cluster_loss
             )
@@ -257,12 +295,12 @@ class spCLUE:
 
             if (epoch + 1) % 100 == 0:
                 predLabel1_np = label1.detach().cpu().numpy().argmax(axis=1)
-                predLabel3_np = label3.detach().cpu().numpy().argmax(axis=1)
-                cur_ari = round(adjusted_rand_score(predLabel1_np, predLabel3_np), 2)
+                predLabel2_np = label2.detach().cpu().numpy().argmax(axis=1)
+                cur_ari = round(adjusted_rand_score(predLabel1_np, predLabel2_np), 2)
                 print(f"epoch {epoch + 1}: {cur_ari}")
 
                 if epoch + 1 == 100:
-                    self.kappa, self.beta = 0.0, 1.0
+                    self.kappa_cross, self.kappa_same = 0.0, 0.0
 
                 if cur_ari >= max_ari:
                     features_fuse = self.updateResult(batch_case=True)
