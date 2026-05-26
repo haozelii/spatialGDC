@@ -1,19 +1,13 @@
 """
-4-View 2-Orig + 2-Aug Training Loop
-====================================
-V1=orig_spa(NoiseLayer), V2=orig_expr(NoiseLayer)
-V3=aug_spa(NoiseLayer+DropEdge), V4=aug_expr(NoiseLayer+SP-DropEdge)
+2-Level Hierarchical Fusion Training Loop
+===========================================
+Level 1 (same-topo): V1+V3 -> z_spa, V2+V4 -> z_expr  (within-topology fuse)
+Level 2 (cross-topo): z_spa+z_expr -> z_fuse           (cross-topology fuse)
 
-4 CL pairs with kappa budget = 0.10 total:
-  Cross-topo (κ=0.03×2=0.06):
-    Pair1: V1(orig_spa) ↔ V4(aug_expr_SP)  — Innovation
-    Pair2: V3(aug_spa)  ↔ V2(orig_expr)    — Standard
-  Same-topo augmentation invariance (κ=0.02×2=0.04):
-    Pair3: V1(orig_spa) ↔ V3(aug_spa)      — Spa aug invariance
-    Pair4: V2(orig_expr)↔ V4(aug_expr)     — Expr aug invariance
-
-Cluster CL: cross-topo only (V1↔V2, V3↔V4)
-ICL soft penalty ← Innovation 2
+Contrastive Learning (simplified: 1 pair each):
+  Instance CL:  ICL(h_spa, h_expr)          — 1 pair, cross-topology alignment
+  Cluster CL:   CCL(label_spa, label_expr)   — 1 pair, cross-topology alignment
+  Reconstruction: MSE(x_rec, input)
 """
 
 import torch
@@ -50,6 +44,12 @@ class spCLUE:
         batch_train=False,
         expr_keep_prob=None,
         use_instance_cl=True,
+        fusion_type="attention",
+        num_views=4,
+        use_intersection_cl=True,
+        use_spatial_drop=True,
+        fn_penalty=2.0,
+        use_union=False,
     ):
         self.device = device
         self.learning_rate = learning_rate
@@ -61,21 +61,21 @@ class spCLUE:
         self.graph_corr = graph_corr
         self.gamma = gamma
         self.beta = beta
-        # Kappa budget: cross-topo 0.03×2 + same-topo 0.02×2 = 0.10
-        self.kappa_cross = 0.03   # per cross-topo pair
-        self.kappa_same = 0.02    # per same-topo pair
+        self.kappa = kappa
         self.dims_list = [dim_input, dim_hidden, dim_embed]
         self.n_spot = input_data.shape[0]
         self.use_instance_cl = use_instance_cl
+        self.fusion_type = fusion_type
+        self.num_views = num_views
+        self.use_intersection_cl = use_intersection_cl
+        self.use_spatial_drop = use_spatial_drop
+        self.fn_penalty = fn_penalty
+        self.use_union = use_union
         
         fix_seed(self.random_seed)
         self.input_data = torch.FloatTensor(input_data).to(self.device)
-        self.g_spatial = sparse_mx_to_torch_sparse_tensor(graph_dict["spatial"]).to(
-            self.device
-        )
-        self.g_expr = sparse_mx_to_torch_sparse_tensor(graph_dict["expr"]).to(
-            self.device
-        )
+        self.g_spatial = sparse_mx_to_torch_sparse_tensor(graph_dict["spatial"]).to(self.device)
+        self.g_expr = sparse_mx_to_torch_sparse_tensor(graph_dict["expr"]).to(self.device)
         
         if expr_keep_prob is not None:
             self.expr_keep_prob = torch.FloatTensor(expr_keep_prob).to(self.device)
@@ -84,7 +84,8 @@ class spCLUE:
 
         if batch_list is None:
             self.model = CCGCN(
-                self.dims_list, self.n_clusters, self.graph_corr, dropout
+                self.dims_list, self.n_clusters, self.graph_corr, dropout,
+                fusion_type=self.fusion_type, num_views=self.num_views
             ).to(self.device)
         else:
             self.n_batches = len(set(batch_list))
@@ -92,7 +93,8 @@ class spCLUE:
             self.batchList = torch.LongTensor(batch_list).to(self.device)
             self.batch_train = batch_train
             self.model = CCGCNs(
-                self.dims_list, self.n_clusters, self.n_batches, self.graph_corr
+                self.dims_list, self.n_clusters, self.n_batches, self.graph_corr,
+                fusion_type=self.fusion_type
             ).to(self.device)
 
     def loss_idx(self):
@@ -106,31 +108,31 @@ class spCLUE:
         with torch.no_grad():
             self.model.eval()
             if batch_case:
-                _, _, _, _, features_fuse, _, _, _, _, x_rec = self.model(
-                    self.input_data, 
-                    self.g_spatial, 
-                    self.g_expr, 
+                _, _, features_fuse, _, _, x_rec = self.model(
+                    self.input_data, self.g_spatial, self.g_expr,
                     adj2_keep_prob=self.expr_keep_prob,
-                    batch_onehot=self.batchList
+                    batch_onehot=self.batchList,
+                    use_spatial_drop=self.use_spatial_drop
                 )
                 features_fuse = features_fuse.detach().cpu().numpy()
                 return features_fuse
 
-            _, _, _, _, features_fuse, _, _, _, _, x_rec = self.model(
-                self.input_data, 
-                self.g_spatial, 
-                self.g_expr,
-                adj2_keep_prob=self.expr_keep_prob 
+            _, _, features_fuse, _, _, x_rec = self.model(
+                self.input_data, self.g_spatial, self.g_expr,
+                adj2_keep_prob=self.expr_keep_prob,
+                use_spatial_drop=self.use_spatial_drop
             )
             predLabel = self.model.getCluster(features_fuse)
             features_fuse = features_fuse.detach().cpu().numpy()
             predLabel = predLabel.detach().cpu().numpy()
             x_rec = x_rec.detach().cpu().numpy()
-            
             return predLabel, features_fuse, x_rec
 
     def train(self):
-        self.instance_crit = IntersectionContrastiveLoss()
+        if self.use_intersection_cl:
+            self.instance_crit = IntersectionContrastiveLoss(fn_penalty=self.fn_penalty, use_union=self.use_union)
+        else:
+            self.instance_crit = ContrastiveLoss()
         self.cluster_crit = ClusterLoss(self.n_clusters, self.device)
         self.rec_crit = MSELoss()
 
@@ -150,50 +152,28 @@ class spCLUE:
             adjust_learning_rate(self.optimizer, epoch, self.learning_rate)
             self.optimizer.zero_grad()
 
-            (
-                h1, h2, h3, h4,
-                output_fuse,
-                label1, label2, label3, label4,
-                x_rec,
-            ) = self.model(
-                self.input_data, 
-                self.g_spatial, 
-                self.g_expr,
-                adj2_keep_prob=self.expr_keep_prob
+            h_spa, h_expr, z_fuse, label_spa, label_expr, x_rec = self.model(
+                self.input_data, self.g_spatial, self.g_expr,
+                adj2_keep_prob=self.expr_keep_prob,
+                use_spatial_drop=self.use_spatial_drop
             )
             
-            # V1=orig_spa, V2=orig_expr, V3=aug_spa, V4=aug_expr(SP)
             if self.use_instance_cl:
-                # Cross-topo pairs (Innovation + standard)
-                ic_14 = (
-                    self.instance_crit(h1, h4, adj_spatial_dense, adj_expr_dense)
-                    + self.instance_crit(h4, h1, adj_spatial_dense, adj_expr_dense)
-                ) / 2
-                ic_32 = (
-                    self.instance_crit(h3, h2, adj_spatial_dense, adj_expr_dense)
-                    + self.instance_crit(h2, h3, adj_spatial_dense, adj_expr_dense)
-                ) / 2
-                # Same-topo augmentation invariance
-                ic_13 = (
-                    self.instance_crit(h1, h3, adj_spatial_dense, adj_expr_dense)
-                    + self.instance_crit(h3, h1, adj_spatial_dense, adj_expr_dense)
-                ) / 2
-                ic_24 = (
-                    self.instance_crit(h2, h4, adj_spatial_dense, adj_expr_dense)
-                    + self.instance_crit(h4, h2, adj_spatial_dense, adj_expr_dense)
-                ) / 2
-                cur_contrastive_loss = (
-                    self.kappa_cross * (ic_14 + ic_32) 
-                    + self.kappa_same * (ic_13 + ic_24)
-                )
+                if self.use_intersection_cl:
+                    ic_loss = (
+                        self.instance_crit(h_spa, h_expr, adj_spatial_dense, adj_expr_dense)
+                        + self.instance_crit(h_expr, h_spa, adj_spatial_dense, adj_expr_dense)
+                    ) / 2
+                else:
+                    ic_loss = (
+                        self.instance_crit(h_spa, h_expr)
+                        + self.instance_crit(h_expr, h_spa)
+                    ) / 2
+                cur_contrastive_loss = self.kappa * ic_loss
             else:
                 cur_contrastive_loss = torch.tensor(0.0).to(self.device)
             
-            # Cluster CL: cross-topo (orig↔orig) + (aug↔aug)
-            cur_cluster_loss = (
-                self.cluster_crit(label1, label2)    # orig_spa ↔ orig_expr
-                + self.cluster_crit(label3, label4)  # aug_spa ↔ aug_expr
-            )
+            cur_cluster_loss = self.cluster_crit(label_spa, label_expr)
             cur_rec_expr_loss = self.rec_crit(x_rec, self.input_data)
 
             cur_batch_loss = (
@@ -205,9 +185,9 @@ class spCLUE:
             self.optimizer.step()
             
             if (epoch + 1) % 100 == 0:
-                predLabel1_np = label1.detach().cpu().numpy().argmax(axis=1)
-                predLabel2_np = label2.detach().cpu().numpy().argmax(axis=1)
-                cur_ari = adjusted_rand_score(predLabel1_np, predLabel2_np)
+                predLabel_spa = label_spa.detach().cpu().numpy().argmax(axis=1)
+                predLabel_expr = label_expr.detach().cpu().numpy().argmax(axis=1)
+                cur_ari = adjusted_rand_score(predLabel_spa, predLabel_expr)
                 print(f"epoch {epoch + 1}: cross-topo ARI = {cur_ari:.4f}")
                 if cur_ari >= max_ari:
                     predLabel, features_fuse, x_rec = self.updateResult()
@@ -216,11 +196,10 @@ class spCLUE:
         print("Training Finished =================<")
         with torch.no_grad():
             self.model.eval()
-            _, _, _, _, features_fuse, _, _, _, _, x_rec = self.model(
-                self.input_data, 
-                self.g_spatial, 
-                self.g_expr,
-                adj2_keep_prob=self.expr_keep_prob
+            _, _, features_fuse, _, _, x_rec = self.model(
+                self.input_data, self.g_spatial, self.g_expr,
+                adj2_keep_prob=self.expr_keep_prob,
+                use_spatial_drop=self.use_spatial_drop
             )
             predLabel = self.model.getCluster(features_fuse)
             features_fuse = features_fuse.detach().cpu().numpy()
@@ -245,43 +224,23 @@ class spCLUE:
             adjust_learning_rate(self.optimizer, epoch, self.learning_rate)
             self.optimizer.zero_grad()
 
-            (
-                h1, h2, h3, h4,
-                output_fuse,
-                label1, label2, label3, label4,
-                x_rec,
-            ) = self.model(
-                self.input_data, 
-                self.g_spatial, 
-                self.g_expr, 
+            h_spa, h_expr, z_fuse, label_spa, label_expr, x_rec = self.model(
+                self.input_data, self.g_spatial, self.g_expr,
                 adj2_keep_prob=self.expr_keep_prob,
-                batch_onehot=self.batchList
+                batch_onehot=self.batchList,
+                use_spatial_drop=self.use_spatial_drop
             )
 
             cur_loss_id = self.loss_idx()
             
-            # Cross-topo + same-topo CL
-            cur_contrastive_loss = (
-                self.kappa_cross * (
-                    self.instance_crit(h1[cur_loss_id], h4[cur_loss_id])
-                    + self.instance_crit(h4[cur_loss_id], h1[cur_loss_id])
-                    + self.instance_crit(h3[cur_loss_id], h2[cur_loss_id])
-                    + self.instance_crit(h2[cur_loss_id], h3[cur_loss_id])
-                ) / 4
-                + self.kappa_same * (
-                    self.instance_crit(h1[cur_loss_id], h3[cur_loss_id])
-                    + self.instance_crit(h3[cur_loss_id], h1[cur_loss_id])
-                    + self.instance_crit(h2[cur_loss_id], h4[cur_loss_id])
-                    + self.instance_crit(h4[cur_loss_id], h2[cur_loss_id])
-                ) / 4
-            )
+            cur_contrastive_loss = self.kappa * (
+                self.instance_crit(h_spa[cur_loss_id], h_expr[cur_loss_id])
+                + self.instance_crit(h_expr[cur_loss_id], h_spa[cur_loss_id])
+            ) / 2
             
             cur_cluster_loss = self.cluster_crit(
-                label1[cur_loss_id], label2[cur_loss_id]
-            ) + self.cluster_crit(
-                label3[cur_loss_id], label4[cur_loss_id]
+                label_spa[cur_loss_id], label_expr[cur_loss_id]
             )
-            
             cur_rec_expr_loss = self.rec_crit(x_rec, self.input_data)
 
             cur_batch_loss = (
@@ -289,33 +248,28 @@ class spCLUE:
                 + self.gamma * cur_rec_expr_loss
                 + self.beta * cur_cluster_loss
             )
-
             cur_batch_loss.backward()
             self.optimizer.step()
 
             if (epoch + 1) % 100 == 0:
-                predLabel1_np = label1.detach().cpu().numpy().argmax(axis=1)
-                predLabel2_np = label2.detach().cpu().numpy().argmax(axis=1)
-                cur_ari = round(adjusted_rand_score(predLabel1_np, predLabel2_np), 2)
+                predLabel_spa = label_spa.detach().cpu().numpy().argmax(axis=1)
+                predLabel_expr = label_expr.detach().cpu().numpy().argmax(axis=1)
+                cur_ari = round(adjusted_rand_score(predLabel_spa, predLabel_expr), 2)
                 print(f"epoch {epoch + 1}: {cur_ari}")
-
                 if epoch + 1 == 100:
-                    self.kappa_cross, self.kappa_same = 0.0, 0.0
-
+                    self.kappa = 0.0
                 if cur_ari >= max_ari:
                     features_fuse = self.updateResult(batch_case=True)
                     return "hello", features_fuse
-        print("Training Finished =================<")
 
+        print("Training Finished =================<")
         with torch.no_grad():
             self.model.eval()
-            _, _, _, _, features_fuse, _, _, _, _, _ = self.model(
-                self.input_data, 
-                self.g_spatial, 
-                self.g_expr, 
+            _, _, features_fuse, _, _, _ = self.model(
+                self.input_data, self.g_spatial, self.g_expr,
                 adj2_keep_prob=self.expr_keep_prob,
-                batch_onehot=self.batchList
+                batch_onehot=self.batchList,
+                use_spatial_drop=self.use_spatial_drop
             )
             features_fuse = features_fuse.detach().cpu().numpy()
-
         return "hello", features_fuse

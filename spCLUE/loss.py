@@ -135,12 +135,11 @@ class ContrastiveLoss(nn.Module):
 
 #假负样本排斥了减弱
 class IntersectionContrastiveLoss(nn.Module):
-    def __init__(self, temperature=0.2, fn_penalty=2.0) -> None:
+    def __init__(self, temperature=0.2, fn_penalty=2.0, use_union=False) -> None:
         super().__init__()
         self.temperature = temperature
-        # 🌟 新增：软惩罚系数。值越大，对假负样本的排斥力越弱
-        # 如果 fn_penalty = 0，退化为普通 InfoNCE；如果你之前用 -inf，相当于 fn_penalty = 无穷大
-        self.fn_penalty = fn_penalty 
+        self.fn_penalty = fn_penalty
+        self.use_union = use_union
 
     def forward(self, x, xbar, adj_spatial_dense, adj_expr_dense, eps=1e-8):
         x = F.normalize(x, p=2, dim=1)  
@@ -148,9 +147,12 @@ class IntersectionContrastiveLoss(nn.Module):
         
         N = x.shape[0]
         
-        # 1. 寻找交集邻域（潜在的假负样本）
-        intersection_mask = (adj_spatial_dense > 0) & (adj_expr_dense > 0) 
-        intersection_mask.fill_diagonal_(False)
+        # 假负样本池：union → 更大池子，intersection → 更精准
+        if self.use_union:
+            fn_mask = (adj_spatial_dense > 0) | (adj_expr_dense > 0)
+        else:
+            fn_mask = (adj_spatial_dense > 0) & (adj_expr_dense > 0)
+        fn_mask.fill_diagonal_(False)
         
         # 2. 计算基础相似度矩阵
         sim_matrix = (x @ xbar.T) / self.temperature  # [N, N]
@@ -163,7 +165,7 @@ class IntersectionContrastiveLoss(nn.Module):
         # 这意味着在 exp() 之后，它们在分母中的比重会被缩小 exp(fn_penalty) 倍，但不会彻底消失！
         sim_matrix_masked = sim_matrix.clone()
         if self.fn_penalty > 0:
-            sim_matrix_masked[intersection_mask] = sim_matrix_masked[intersection_mask] - self.fn_penalty
+            sim_matrix_masked[fn_mask] = sim_matrix_masked[fn_mask] - self.fn_penalty
         
         # 排除掉对角线（自己不是自己的负样本）
         sim_matrix_masked.fill_diagonal_(float('-inf'))
