@@ -120,6 +120,11 @@ for sample_name in DLPFC_SAMPLES:
         })
         print(f"  >>> {variant} mean ARI: {mean_ari:.4f} ± {std_ari:.4f}")
 
+# Save intermediate results after DLPFC
+df_dlpfc = pd.DataFrame(results)
+df_dlpfc.to_csv("SpatialGDC_Adaptive_vs_Flat_Eta_DLPFC.csv", index=False)
+print("DLPFC results saved to SpatialGDC_Adaptive_vs_Flat_Eta_DLPFC.csv")
+
 # ============================================================
 # BRCA
 # ============================================================
@@ -153,13 +158,9 @@ spatial_coords_brca = (spatial_coords_brca - spatial_coords_brca.min(axis=0)) / 
 expr_keep_prob_brca = spCLUE.compute_spatial_keep_prob(g_expr_brca, spatial_coords_brca, sigma=brca_params["sigma"])
 
 # Load ground truth
-import json
-with open(os.path.join(BRCA_PATH, "metadata.json"), "r") as f:
-    brca_meta = json.load(f)
-fine_annot = pd.Series(brca_meta["fine_annot_type"])
-adata_brca_raw.obs["fine_annot_type"] = fine_annot.values
-
-n_clusters_brca = fine_annot.nunique()
+meta_brca = pd.read_csv("./dataset/BRCA1/metadata.tsv", sep='\t', index_col=0)
+adata_brca_raw.obs['Region'] = meta_brca.loc[adata_brca_raw.obs_names, 'fine_annot_type']
+n_clusters_brca = adata_brca_raw.obs['Region'].nunique()
 
 s_b, g_b, k_b = brca_params["sigma"], brca_params["gamma"], brca_params["kappa"]
 
@@ -196,9 +197,9 @@ for variant, use_intcl, fn_penalty, use_adaptive in CONFIGS:
             spCLUE.clustering(adata, n_clusters_brca, key="emb", refinement=False, cluster_methods="mclust")
 
         cluster_col = 'mclust_refined' if 'mclust_refined' in adata.obs.columns else 'mclust'
-        adata_eval = adata[adata.obs.fine_annot_type.notna()].copy()
-        ari = adjusted_rand_score(adata_eval.obs["fine_annot_type"], adata_eval.obs[cluster_col])
-        nmi = normalized_mutual_info_score(adata_eval.obs["fine_annot_type"], adata_eval.obs[cluster_col])
+        adata_eval = adata[adata.obs.Region.notna()].copy()
+        ari = adjusted_rand_score(adata_eval.obs["Region"], adata_eval.obs[cluster_col])
+        nmi = normalized_mutual_info_score(adata_eval.obs["Region"], adata_eval.obs[cluster_col])
         ari_list.append(ari)
         nmi_list.append(nmi)
         print(f"  BRCA {variant} seed={seed}: ARI={ari:.4f} NMI={nmi:.4f}")
