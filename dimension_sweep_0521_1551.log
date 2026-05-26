@@ -1,0 +1,409 @@
+Backed up to dimension_sweep_backup_0521_1551
+
+============================================================
+DIMENSION SWEEP — spatialGDC
+============================================================
+
+[0] BASELINE
+
+############################################################
+# Baseline
+############################################################
+======================>
+epoch 100: cross-topo ARI = 0.5637
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151674: ARI=0.4716 NMI=0.6058
+
+==================================================
+Baseline: 151675
+==================================================
+--- 正在从 ./dataset/DLPFC/151675/ 加载数据 ---
+原始数据维度: 3592 spots, 33538 genes
+✅ 标签合并成功！
+--- 执行过滤、归一化与缩放 ---
+--- 使用 sklearn 进行 200 维全量基因 PCA 降维 (可能需要十几秒) ---
+✅ 预处理完成！用于训练的 X_pca 维度: (3592, 200)
+Spots: 3592, n_clusters: 7
+PCA...
+create adjacent matrix from spatial idx --------------->
+create knn graph ---->
+spatial knn graph created ----<
+create adjacent matrix from pca expr --------------->
+create knn graph ---->
+expr knn graph created ----<
+Training Start =========================>
+epoch 100: cross-topo ARI = 0.4519
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151675: ARI=0.5226 NMI=0.6348
+
+==================================================
+Baseline: 151676
+==================================================
+--- 正在从 ./dataset/DLPFC/151676/ 加载数据 ---
+原始数据维度: 3460 spots, 33538 genes
+✅ 标签合并成功！
+--- 执行过滤、归一化与缩放 ---
+--- 使用 sklearn 进行 200 维全量基因 PCA 降维 (可能需要十几秒) ---
+✅ 预处理完成！用于训练的 X_pca 维度: (3460, 200)
+Spots: 3460, n_clusters: 7
+PCA...
+create adjacent matrix from spatial idx --------------->
+create knn graph ---->
+spatial knn graph created ----<
+create adjacent matrix from pca expr --------------->
+create knn graph ---->
+expr knn graph created ----<
+Training Start =========================>
+epoch 100: cross-topo ARI = 0.5131
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151676: ARI=0.5345 NMI=0.6515
+
+Baseline: Mean ARI=0.5089 NMI=0.6262
+Saved /home/bio/lhz/spatialGDC/dimension_sweep_baseline.csv
+
+
+[1] E1: EMA
+
+############################################################
+# EMA
+############################################################
+<
+Training Start =========================>
+epoch 100: cross-topo ARI = 0.5637
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151674: ARI=0.4716 NMI=0.6058
+
+==================================================
+EMA: 151675
+==================================================
+--- 正在从 ./dataset/DLPFC/151675/ 加载数据 ---
+原始数据维度: 3592 spots, 33538 genes
+✅ 标签合并成功！
+--- 执行过滤、归一化与缩放 ---
+--- 使用 sklearn 进行 200 维全量基因 PCA 降维 (可能需要十几秒) ---
+✅ 预处理完成！用于训练的 X_pca 维度: (3592, 200)
+Spots: 3592, n_clusters: 7
+PCA...
+create adjacent matrix from spatial idx --------------->
+create knn graph ---->
+spatial knn graph created ----<
+create adjacent matrix from pca expr --------------->
+create knn graph ---->
+expr knn graph created ----<
+Training Start =========================>
+epoch 100: cross-topo ARI = 0.4520
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151675: ARI=0.5226 NMI=0.6348
+
+==================================================
+EMA: 151676
+==================================================
+--- 正在从 ./dataset/DLPFC/151676/ 加载数据 ---
+原始数据维度: 3460 spots, 33538 genes
+✅ 标签合并成功！
+--- 执行过滤、归一化与缩放 ---
+--- 使用 sklearn 进行 200 维全量基因 PCA 降维 (可能需要十几秒) ---
+✅ 预处理完成！用于训练的 X_pca 维度: (3460, 200)
+Spots: 3460, n_clusters: 7
+PCA...
+create adjacent matrix from spatial idx --------------->
+create knn graph ---->
+spatial knn graph created ----<
+create adjacent matrix from pca expr --------------->
+create knn graph ---->
+expr knn graph created ----<
+Training Start =========================>
+epoch 100: cross-topo ARI = 0.5131
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151676: ARI=0.5345 NMI=0.6515
+
+EMA: Mean ARI=0.5121 NMI=0.6279
+Saved /home/bio/lhz/spatialGDC/dimension_sweep_ema.csv
+
+
+[2a] E2: Temperature = 0.5
+
+############################################################
+# Temp0.5
+############################################################
+=========================>
+epoch 100: cross-topo ARI = 0.5644
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151674: ARI=0.3646 NMI=0.5176
+
+==================================================
+Temp0.5: 151675
+==================================================
+--- 正在从 ./dataset/DLPFC/151675/ 加载数据 ---
+原始数据维度: 3592 spots, 33538 genes
+✅ 标签合并成功！
+--- 执行过滤、归一化与缩放 ---
+--- 使用 sklearn 进行 200 维全量基因 PCA 降维 (可能需要十几秒) ---
+✅ 预处理完成！用于训练的 X_pca 维度: (3592, 200)
+Spots: 3592, n_clusters: 7
+PCA...
+create adjacent matrix from spatial idx --------------->
+create knn graph ---->
+spatial knn graph created ----<
+create adjacent matrix from pca expr --------------->
+create knn graph ---->
+expr knn graph created ----<
+Training Start =========================>
+epoch 100: cross-topo ARI = 0.4481
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151675: ARI=0.4153 NMI=0.5633
+
+==================================================
+Temp0.5: 151676
+==================================================
+--- 正在从 ./dataset/DLPFC/151676/ 加载数据 ---
+原始数据维度: 3460 spots, 33538 genes
+✅ 标签合并成功！
+--- 执行过滤、归一化与缩放 ---
+--- 使用 sklearn 进行 200 维全量基因 PCA 降维 (可能需要十几秒) ---
+✅ 预处理完成！用于训练的 X_pca 维度: (3460, 200)
+Spots: 3460, n_clusters: 7
+PCA...
+create adjacent matrix from spatial idx --------------->
+create knn graph ---->
+spatial knn graph created ----<
+create adjacent matrix from pca expr --------------->
+create knn graph ---->
+expr knn graph created ----<
+Training Start =========================>
+epoch 100: cross-topo ARI = 0.4775
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151676: ARI=0.4140 NMI=0.6025
+
+Temp0.5: Mean ARI=0.4315 NMI=0.5817
+Saved /home/bio/lhz/spatialGDC/dimension_sweep_temp_0_5.csv
+
+
+[2b] E2: Temperature = 0.7
+
+############################################################
+# Temp0.7
+############################################################
+=========================>
+epoch 100: cross-topo ARI = 0.5590
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151674: ARI=0.3704 NMI=0.5149
+
+==================================================
+Temp0.7: 151675
+==================================================
+--- 正在从 ./dataset/DLPFC/151675/ 加载数据 ---
+原始数据维度: 3592 spots, 33538 genes
+✅ 标签合并成功！
+--- 执行过滤、归一化与缩放 ---
+--- 使用 sklearn 进行 200 维全量基因 PCA 降维 (可能需要十几秒) ---
+✅ 预处理完成！用于训练的 X_pca 维度: (3592, 200)
+Spots: 3592, n_clusters: 7
+PCA...
+create adjacent matrix from spatial idx --------------->
+create knn graph ---->
+spatial knn graph created ----<
+create adjacent matrix from pca expr --------------->
+create knn graph ---->
+expr knn graph created ----<
+Training Start =========================>
+epoch 100: cross-topo ARI = 0.4317
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151675: ARI=0.4216 NMI=0.5684
+
+==================================================
+Temp0.7: 151676
+==================================================
+--- 正在从 ./dataset/DLPFC/151676/ 加载数据 ---
+原始数据维度: 3460 spots, 33538 genes
+✅ 标签合并成功！
+--- 执行过滤、归一化与缩放 ---
+--- 使用 sklearn 进行 200 维全量基因 PCA 降维 (可能需要十几秒) ---
+✅ 预处理完成！用于训练的 X_pca 维度: (3460, 200)
+Spots: 3460, n_clusters: 7
+PCA...
+create adjacent matrix from spatial idx --------------->
+create knn graph ---->
+spatial knn graph created ----<
+create adjacent matrix from pca expr --------------->
+create knn graph ---->
+expr knn graph created ----<
+Training Start =========================>
+epoch 100: cross-topo ARI = 0.3044
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151676: ARI=0.4798 NMI=0.6320
+
+Temp0.7: Mean ARI=0.4371 NMI=0.5742
+Saved /home/bio/lhz/spatialGDC/dimension_sweep_temp_0_7.csv
+
+
+[3] E3: Denoising Recon
+
+############################################################
+# Denoising
+############################################################
+==================>
+epoch 100: cross-topo ARI = 0.5507
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151674: ARI=0.4277 NMI=0.5461
+
+==================================================
+Denoising: 151675
+==================================================
+--- 正在从 ./dataset/DLPFC/151675/ 加载数据 ---
+原始数据维度: 3592 spots, 33538 genes
+✅ 标签合并成功！
+--- 执行过滤、归一化与缩放 ---
+--- 使用 sklearn 进行 200 维全量基因 PCA 降维 (可能需要十几秒) ---
+✅ 预处理完成！用于训练的 X_pca 维度: (3592, 200)
+Spots: 3592, n_clusters: 7
+PCA...
+create adjacent matrix from spatial idx --------------->
+create knn graph ---->
+spatial knn graph created ----<
+create adjacent matrix from pca expr --------------->
+create knn graph ---->
+expr knn graph created ----<
+Training Start =========================>
+epoch 100: cross-topo ARI = 0.4433
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151675: ARI=0.4505 NMI=0.5992
+
+==================================================
+Denoising: 151676
+==================================================
+--- 正在从 ./dataset/DLPFC/151676/ 加载数据 ---
+原始数据维度: 3460 spots, 33538 genes
+✅ 标签合并成功！
+--- 执行过滤、归一化与缩放 ---
+--- 使用 sklearn 进行 200 维全量基因 PCA 降维 (可能需要十几秒) ---
+✅ 预处理完成！用于训练的 X_pca 维度: (3460, 200)
+Spots: 3460, n_clusters: 7
+PCA...
+create adjacent matrix from spatial idx --------------->
+create knn graph ---->
+spatial knn graph created ----<
+create adjacent matrix from pca expr --------------->
+create knn graph ---->
+expr knn graph created ----<
+Training Start =========================>
+epoch 100: cross-topo ARI = 0.5145
+fitting ...
+
+  |                                                                            
+  |                                                                      |   0%
+  |                                                                            
+  |===================================                                   |  50%
+  |                                                                            
+  |======================================================================| 100%
+151676: ARI=0.5054 NMI=0.6197
+
+Denoising: Mean ARI=0.5017 NMI=0.6258
+Saved /home/bio/lhz/spatialGDC/dimension_sweep_denoising.csv
+
+
+============================================================
+SWEEP COMPLETE — Summary
+============================================================
+Traceback (most recent call last):
+  File "/home/bio/lhz/spatialGDC/dimension_sweep_runner.py", line 145, in <module>
+    import pandas as pd
+ModuleNotFoundError: No module named 'pandas'
