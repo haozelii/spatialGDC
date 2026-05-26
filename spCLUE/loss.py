@@ -135,11 +135,12 @@ class ContrastiveLoss(nn.Module):
 
 #假负样本排斥了减弱
 class IntersectionContrastiveLoss(nn.Module):
-    def __init__(self, temperature=0.2, fn_penalty=2.0, use_union=False) -> None:
+    def __init__(self, temperature=0.2, fn_penalty=2.0, use_union=False, adaptive_eta=True) -> None:
         super().__init__()
         self.temperature = temperature
         self.fn_penalty = fn_penalty
         self.use_union = use_union
+        self.adaptive_eta = adaptive_eta
 
     def forward(self, x, xbar, adj_spatial_dense, adj_expr_dense, eps=1e-8):
         x = F.normalize(x, p=2, dim=1)  
@@ -160,12 +161,22 @@ class IntersectionContrastiveLoss(nn.Module):
         # 3. 计算正样本得分
         pos_sim = (x * xbar).sum(dim=1) / self.temperature  
         
-        # 4. 🌟 核心修改：软权重惩罚 (Soft Masking)
-        # 不再使用 -inf，而是将假负样本的相似度强行降低 fn_penalty 个 logit
-        # 这意味着在 exp() 之后，它们在分母中的比重会被缩小 exp(fn_penalty) 倍，但不会彻底消失！
+        # 4. 🌟 软权重惩罚
         sim_matrix_masked = sim_matrix.clone()
         if self.fn_penalty > 0:
-            sim_matrix_masked[fn_mask] = sim_matrix_masked[fn_mask] - self.fn_penalty
+            if self.adaptive_eta:
+                # 密度感知自适应: η_ij = η_base × (deg_H(i) + deg_H(j)) / (2 × avg_deg_H)
+                deg_H = fn_mask.float().sum(dim=1)  # [N]: per-node homologous degree
+                nonzero_mask = deg_H > 0
+                if nonzero_mask.any():
+                    avg_deg_H = deg_H[nonzero_mask].mean()
+                    deg_row = deg_H.unsqueeze(1)  # [N, 1]
+                    deg_col = deg_H.unsqueeze(0)  # [1, N]
+                    eta_matrix = self.fn_penalty * (deg_row + deg_col) / (2.0 * avg_deg_H + 1e-8)
+                    sim_matrix_masked[fn_mask] = sim_matrix_masked[fn_mask] - eta_matrix[fn_mask]
+            else:
+                # Flat penalty: uniform scalar η for all intersection neighbors
+                sim_matrix_masked[fn_mask] = sim_matrix_masked[fn_mask] - self.fn_penalty
         
         # 排除掉对角线（自己不是自己的负样本）
         sim_matrix_masked.fill_diagonal_(float('-inf'))

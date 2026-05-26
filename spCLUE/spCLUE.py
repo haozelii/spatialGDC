@@ -50,6 +50,7 @@ class spCLUE:
         use_spatial_drop=True,
         fn_penalty=2.0,
         use_union=False,
+        adaptive_eta=True,
     ):
         self.device = device
         self.learning_rate = learning_rate
@@ -71,6 +72,7 @@ class spCLUE:
         self.use_spatial_drop = use_spatial_drop
         self.fn_penalty = fn_penalty
         self.use_union = use_union
+        self.adaptive_eta = adaptive_eta
         
         fix_seed(self.random_seed)
         self.input_data = torch.FloatTensor(input_data).to(self.device)
@@ -130,7 +132,10 @@ class spCLUE:
 
     def train(self):
         if self.use_intersection_cl:
-            self.instance_crit = IntersectionContrastiveLoss(fn_penalty=self.fn_penalty, use_union=self.use_union)
+            self.instance_crit = IntersectionContrastiveLoss(
+                fn_penalty=self.fn_penalty, use_union=self.use_union,
+                adaptive_eta=self.adaptive_eta
+            )
         else:
             self.instance_crit = ContrastiveLoss()
         self.cluster_crit = ClusterLoss(self.n_clusters, self.device)
