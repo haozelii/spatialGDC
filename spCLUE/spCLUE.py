@@ -50,7 +50,7 @@ class spCLUE:
         use_spatial_drop=True,
         fn_penalty=2.0,
         use_union=False,
-        adaptive_eta=True,
+        adaptive_eta=False,
         adaptive_mode="degree",
         eta_floor=0.5,
     ):
