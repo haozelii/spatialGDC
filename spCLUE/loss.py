@@ -135,12 +135,21 @@ class ContrastiveLoss(nn.Module):
 
 #假负样本排斥了减弱
 class IntersectionContrastiveLoss(nn.Module):
-    def __init__(self, temperature=0.2, fn_penalty=2.0, use_union=False, adaptive_eta=True) -> None:
+    def __init__(self, temperature=0.2, fn_penalty=2.0, use_union=False,
+                 adaptive_eta=True, adaptive_mode="degree", eta_floor=0.5) -> None:
+        """
+        adaptive_mode:
+          - "degree": binary intersection deg_H, formula 2
+          - "floor":  same as degree but clamped to [eta_floor * fn_penalty, inf)
+          - "soft":   soft intersection: deg_H = sum(min(w_spa, w_expr))
+        """
         super().__init__()
         self.temperature = temperature
         self.fn_penalty = fn_penalty
         self.use_union = use_union
         self.adaptive_eta = adaptive_eta
+        self.adaptive_mode = adaptive_mode
+        self.eta_floor = eta_floor
 
     def forward(self, x, xbar, adj_spatial_dense, adj_expr_dense, eps=1e-8):
         x = F.normalize(x, p=2, dim=1)  
@@ -165,14 +174,26 @@ class IntersectionContrastiveLoss(nn.Module):
         sim_matrix_masked = sim_matrix.clone()
         if self.fn_penalty > 0:
             if self.adaptive_eta:
-                # 密度感知自适应: η_ij = η_base × (deg_H(i) + deg_H(j)) / (2 × avg_deg_H)
-                deg_H = fn_mask.float().sum(dim=1)  # [N]: per-node homologous degree
+                if self.adaptive_mode == "soft":
+                    # 方案 B: soft intersection — min(adj_spatial, adj_expr) weights
+                    soft_weights = torch.min(adj_spatial_dense, adj_expr_dense)  # [N,N]
+                    soft_weights.fill_diagonal_(0)
+                    deg_H = soft_weights.sum(dim=1)  # weighted degree
+                else:
+                    # binary intersection degree
+                    deg_H = fn_mask.float().sum(dim=1)
+
                 nonzero_mask = deg_H > 0
                 if nonzero_mask.any():
                     avg_deg_H = deg_H[nonzero_mask].mean()
                     deg_row = deg_H.unsqueeze(1)  # [N, 1]
                     deg_col = deg_H.unsqueeze(0)  # [1, N]
-                    eta_matrix = self.fn_penalty * (deg_row + deg_col) / (2.0 * avg_deg_H + 1e-8)
+                    eta_raw = self.fn_penalty * (deg_row + deg_col) / (2.0 * avg_deg_H + 1e-8)
+                    if self.adaptive_mode == "floor":
+                        # 方案 A: clamp to [eta_floor * fn_penalty, inf)
+                        eta_matrix = torch.clamp(eta_raw, min=self.eta_floor * self.fn_penalty)
+                    else:
+                        eta_matrix = eta_raw
                     sim_matrix_masked[fn_mask] = sim_matrix_masked[fn_mask] - eta_matrix[fn_mask]
             else:
                 # Flat penalty: uniform scalar η for all intersection neighbors

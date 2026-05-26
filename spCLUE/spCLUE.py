@@ -51,6 +51,8 @@ class spCLUE:
         fn_penalty=2.0,
         use_union=False,
         adaptive_eta=True,
+        adaptive_mode="degree",
+        eta_floor=0.5,
     ):
         self.device = device
         self.learning_rate = learning_rate
@@ -73,6 +75,8 @@ class spCLUE:
         self.fn_penalty = fn_penalty
         self.use_union = use_union
         self.adaptive_eta = adaptive_eta
+        self.adaptive_mode = adaptive_mode
+        self.eta_floor = eta_floor
         
         fix_seed(self.random_seed)
         self.input_data = torch.FloatTensor(input_data).to(self.device)
@@ -134,7 +138,9 @@ class spCLUE:
         if self.use_intersection_cl:
             self.instance_crit = IntersectionContrastiveLoss(
                 fn_penalty=self.fn_penalty, use_union=self.use_union,
-                adaptive_eta=self.adaptive_eta
+                adaptive_eta=self.adaptive_eta,
+                adaptive_mode=self.adaptive_mode,
+                eta_floor=self.eta_floor,
             )
         else:
             self.instance_crit = ContrastiveLoss()
