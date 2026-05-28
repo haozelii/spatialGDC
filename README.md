@@ -1,54 +1,133 @@
-# spCLUE
+# SpatialGDC
 
-A Contrastive Learning Approach to Unified Spatial Transcriptomics Analysis Across Single-Slice and Multi-Slice Data
+**Spatial Graph Dual Contrastive Learning for Spatial Transcriptomics Domain Identification**
 
-## Overview
+SpatialGDC identifies spatial domains in transcriptomics data by jointly modeling spatial proximity and gene expression similarity through dual-graph contrastive learning. The framework constructs two complementary views — a spatial nearest-neighbor graph and an expression correlation graph — and learns spot representations via hierarchical fusion and spatially-aware contrastive objectives.
 
-Taking a two-slice dataset as an example, SpatialGDC begins by constructing a multi-view graph (spatial view and expression view) for each slice. Next, it extracts spot representations through a graph contrastive learning framework, incorporating a batch prompting module, a clustering contrastive module, and an instance contrastive module. Finally, an attention module integrates the spot embeddings learned from the two contrastive modules, and the decoder reconstructs the gene expression profiles. Given the trained model, spot representations are finally extracted at the bottleneck layer, which are used to identify spatial domains.
+## Architecture
 
-![Overview of spCLUE](./spatialgdc.png)
-
-## Requirements
-
-We recommend that users install the following packages to run spatialgdc.
-
-- python==3.9.0
-- torch==1.13.1
-- numpy==1.23.5
-- scanpy==1.9.3
-- anndata==0.8.0
-- rpy2==3.4.1
-- pandas==1.5.3
-- scipy==1.10.0
-- scikit-learn==1.2.2
-- tqdm==4.64.1
-- matplotlib==3.7.0
-- seaborn==0.12.2
-- jupyter==1.0.0
-- R==4.2.0
-- mclust==6.0.0
-
-You can install SpatialGDC with **anaconda** using the following commands:
-
-```shell
-conda create -n SpatialGDC python=3.9.0
-conda activate spCLUE
-pip install -r requirements.txt
+```
+PCA Input (N×200) → 4-View Shared GCN (200→64→24)
+  V1(spa_orig)  V2(expr_orig)  V3(spa_aug)  V4(expr_aug+SP)
+       ↓              ↓              ↓              ↓
+  Level 1 Fusion (same-topo) → z_spa, z_expr
+       ↓                             ↓
+  Instance CL                   Cluster CL
+       ↓                             ↓
+  Level 2 Fusion (cross-topo) → z_fuse → Decoder → Reconstruction
 ```
 
-## Tutorial
+Key components:
+- **Spatial-Prior Guided DropEdge (SP-DropEdge)**: Feature graph edges are dropped with probability inversely proportional to physical distance, injecting spatial information into the GNN message passing
+- **Two-Level Hierarchical Fusion**: Level 1 resolves augmentation variance within each topology; Level 2 fuses complementary cross-modal information
+- **Spatially-Aware Soft Contrastive Loss**: Spot pairs adjacent in both spatial and expression graphs receive a soft penalty rather than being forcibly repelled
 
-Please find examples of SpatialGDC applications in the tutorial folder, where jupyter notebooks are provided.
+## Installation
 
-**NOTE:** Please update the data paths before running the code.
+```bash
+conda create -n spatialgdc python=3.9
+conda activate spatialgdc
+pip install torch scanpy scikit-learn pandas tqdm rpy2
+```
 
-## Datasets
+mclust (optional, for clustering refinement):
+```r
+install.packages("mclust")
+```
 
-The example spatial transcriptomics datasets can be downloaded with the links below.
+## Quick Start
 
-- **DLPFC**: [*http://spatial.libd.org/spatialLIBD/*](http://spatial.libd.org/spatialLIBD/).
-- **BRCA**: [*https://github.com/JinmiaoChenLab/SEDR_analyses/tree/master/data*](https://github.com/JinmiaoChenLab/SEDR_analyses/tree/master/data).
-- **BARISTA**: [*http://sdmbench.drai.cn*](http://sdmbench.drai.cn).
-- **MOB1**: [*https://singlecell.broadinstitute.org/single_cell/study/SCP815/highly-sensitive-spatial-transcriptomics-at-near-cellular-resolution-with-slide-seqv2#study-summary*](https://singlecell.broadinstitute.org/single_cell/study/SCP815/highly-sensitive-spatial-transcriptomics-at-near-cellular-resolution-with-slide-seqv2#study-summary).
-- **MOB2**: [*https://github.com/JinmiaoChenLab/SEDR_analyses/tree/master/data*](https://github.com/JinmiaoChenLab/SEDR_analyses/tree/master/data).
-- **MOSTA**: [*https://db.cngb.org/stomics/mosta/*](https://db.cngb.org/stomics/mosta/).
+```python
+import scanpy as sc
+from spatialgdc import (
+    SpatialGDC, load_and_preprocess_st, prepare_graph,
+    compute_spatial_keep_prob, clustering, fix_seed
+)
+
+# Load and preprocess Visium data
+fix_seed(0)
+adata = load_and_preprocess_st(data_path="./dataset/DLPFC/151507/")
+adata.obs_names = adata.obs_names.str.replace('-1', '', regex=False).str.strip()
+
+# Build dual graphs
+g_spatial = prepare_graph(adata, "spatial")
+g_expr = prepare_graph(adata, "expr")
+graph_dict = {"spatial": g_spatial, "expr": g_expr}
+
+# Compute spatial prior
+coords = adata.obsm["spatial"].copy()
+coords = (coords - coords.min(axis=0)) / (coords.max(axis=0) - coords.min(axis=0) + 1e-8)
+keep_prob = compute_spatial_keep_prob(g_expr, coords, sigma=0.5)
+
+# Train model
+model = SpatialGDC(
+    input_data=adata.obsm["X_pca"].copy(),
+    graph_dict=graph_dict,
+    n_clusters=7,
+    expr_keep_prob=keep_prob,
+    gamma=1.0, kappa=0.1,
+)
+pred_labels, embeddings, x_rec = model.train()
+
+# Cluster and evaluate
+adata.obsm["emb"] = embeddings
+clustering(adata, 7, key="emb", refinement=True, cluster_methods="mclust")
+```
+
+## Results
+
+### DLPFC (12 dorsolateral prefrontal cortex slices)
+
+| Method | ARI | NMI |
+|--------|-----|-----|
+| **SpatialGDC** | **0.590** | **0.669** |
+| stGRL | 0.533 | 0.666 |
+| STAGATE | 0.512 | 0.657 |
+| Spatial-MGCN | 0.510 | 0.656 |
+| CCST | 0.465 | 0.628 |
+| SEDR | 0.414 | 0.546 |
+| SpaGCN | 0.343 | 0.466 |
+| Seurat | 0.337 | 0.430 |
+
+### BRCA (21-class fine annotation)
+
+| Method | ARI | NMI |
+|--------|-----|-----|
+| **SpatialGDC** | **0.663** | 0.695 |
+| Spatial-MGCN | 0.640 | 0.683 |
+| CCST | 0.589 | **0.706** |
+| stGRL | 0.548 | 0.679 |
+| SpaGCN | 0.538 | 0.652 |
+| STAGATE | 0.494 | 0.642 |
+| Seurat | 0.482 | 0.624 |
+| SEDR | 0.434 | 0.666 |
+
+### MOSTA (12 mouse embryo organs)
+
+| Method | ARI |
+|--------|-----|
+| **SpatialGDC** | **0.406** |
+| stGRL | 0.328 |
+
+## Configuration
+
+SpatialGDC exposes key hyperparameters through the constructor:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `gamma` | 1.0 | Reconstruction loss weight |
+| `kappa` | 0.1 | Instance contrastive loss weight |
+| `beta` | 1.0 | Cluster contrastive loss weight |
+| `fn_penalty` | 2.0 | Soft penalty coefficient for spatially-adjacent pairs |
+| `use_spatial_drop` | True | Enable SP-DropEdge |
+| `use_intersection_cl` | True | Enable spatially-aware soft contrastive loss |
+
+## Citation
+
+```bibtex
+@article{spatialgdc2025,
+  title={SpatialGDC: Spatial Graph Dual Contrastive Learning for Spatial Transcriptomics Domain Identification},
+  author={Li, Haoze},
+  year={2025}
+}
+```
