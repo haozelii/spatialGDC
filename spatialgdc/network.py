@@ -59,13 +59,10 @@ class ConcatProjectionFusion(nn.Module):
         self.view_weights = nn.Parameter(torch.ones(n_views) / n_views)
         
     def forward(self, *views):
-        # Linear baseline (weighted average)
         w = F.softmax(self.view_weights, dim=0)
         linear_fuse = sum(w[i] * views[i] for i in range(self.n_views))
-        # Cross-view interaction via concat+proj
         concat = torch.cat(views, dim=-1)
         interaction = self.proj(concat)
-        # Residual: keep linear baseline, add interaction
         fused = linear_fuse + interaction
         return fused
 
@@ -85,7 +82,6 @@ class PerDimGatedFusion(nn.Module):
     def __init__(self, d=24, n_views=4, hidden=32):
         super().__init__()
         self.n_views = n_views
-        # Gating network: concat → per-dim per-view weights
         self.gate = nn.Sequential(
             nn.Linear(n_views * d, hidden),
             nn.GELU(),
@@ -94,18 +90,15 @@ class PerDimGatedFusion(nn.Module):
         self.view_weights = nn.Parameter(torch.ones(n_views) / n_views)
         
     def forward(self, *views):
-        # Linear baseline
         w = F.softmax(self.view_weights, dim=0)
         linear_fuse = sum(w[i] * views[i] for i in range(self.n_views))
         
-        # Per-dim gating
-        concat = torch.cat(views, dim=-1)  # (N, n_views*d)
-        gate_logits = self.gate(concat).view(-1, self.n_views, len(views[0].T))  # (N, V, d)
-        gate_weights = F.softmax(gate_logits, dim=1)  # softmax over views
-        stacked = torch.stack(views, dim=1)  # (N, V, d)
-        gated_fuse = (gate_weights * stacked).sum(dim=1)  # (N, d)
+        concat = torch.cat(views, dim=-1)
+        gate_logits = self.gate(concat).view(-1, self.n_views, len(views[0].T))
+        gate_weights = F.softmax(gate_logits, dim=1)
+        stacked = torch.stack(views, dim=1)
+        gated_fuse = (gate_weights * stacked).sum(dim=1)
         
-        # Mix gated and linear (learnable balance)
         fused = gated_fuse
         return fused
 
@@ -131,19 +124,15 @@ class TwoLevelFusion(nn.Module):
     """
     def __init__(self, d=24):
         super().__init__()
-        # Level 1: within-topology fusion (2 views each)
         self.spa_fusion = ConcatProjectionFusion(d=d, n_views=2)
         self.expr_fusion = ConcatProjectionFusion(d=d, n_views=2)
         
-        # Level 2: cross-topology fusion (2 fused views)
         self.cross_fusion = ConcatProjectionFusion(d=d, n_views=2)
         
     def forward(self, z1, z2, z3, z4):
-        # ── Level 1: within-topology fusion ──
-        z_spa = self.spa_fusion(z1, z3)  # spatial: orig + aug
-        z_expr = self.expr_fusion(z2, z4)  # expression: orig + aug
+        z_spa = self.spa_fusion(z1, z3)
+        z_expr = self.expr_fusion(z2, z4)
         
-        # ── Level 2: cross-topology fusion ──
         z_fuse = self.cross_fusion(z_spa, z_expr)
         
         return z_fuse, z_spa, z_expr
@@ -160,7 +149,7 @@ class SpatialGDCNet(Module):
         self.n_clusters = n_clusters
         self.graph_corr = graph_corr
         self.fusion_type = fusion_type
-        self.num_views = num_views  # 4=full, 2=ablation (no aug)
+        self.num_views = num_views
 
         self.noiseLayer = NoiseLayer(dropout=self.dropout)
         self.Transform1 = TransForm_W(self.input_dim, self.hidden_dim, self.dropout)
@@ -176,7 +165,7 @@ class SpatialGDCNet(Module):
         elif fusion_type == "two_level":
             self.fusion = TwoLevelFusion(d=self.z_dim)
         elif fusion_type == "ctcf":
-            self.fusion = ConcatProjectionFusion(d=self.z_dim, n_views=num_views)  # fallback
+            self.fusion = ConcatProjectionFusion(d=self.z_dim, n_views=num_views)
         else:
             self.attention = AttentionBlock(self.z_dim)
 
@@ -226,7 +215,7 @@ class SpatialGDCNet(Module):
     def _fuse_pair(self, va, vb):
         """Fuse exactly 2 views (used in both Level 1 and Level 2)."""
         if self.fusion_type == "attention":
-            z = torch.stack([va, vb], dim=1)  # (N, 2, d)
+            z = torch.stack([va, vb], dim=1)
             z_fuse, _ = self.attention(z)
         elif self.fusion_type == "two_level":
             z_fuse, _, _ = self.fusion(va, vb, va, vb)
@@ -259,7 +248,6 @@ class SpatialGDCNet(Module):
         actual_keep_prob = adj2_keep_prob if use_spatial_drop else None
 
         if self.num_views == 2:
-            # 2-view: no augmentation, z_spa=z1, z_expr=z2
             z1 = self.encoder(data, adj1, drop_edge=False)
             z2 = self.encoder(data, adj2, drop_edge=False)
 
@@ -277,34 +265,27 @@ class SpatialGDCNet(Module):
 
             return h_spa, h_expr, z_fuse, label_spa, label_expr, x_rec
 
-        # ── 4-View Encoding ──
-        z1 = self.encoder(data, adj1, drop_edge=False)   # V1: orig spa
-        z2 = self.encoder(data, adj2, drop_edge=False)   # V2: orig expr
-        z3 = self.encoder(data, adj1, drop_edge=True)    # V3: aug spa (DropEdge)
-        z4 = self.encoder(data, adj2, custom_keep_prob=actual_keep_prob, drop_edge=True)  # V4: aug expr (SP-DropEdge)
+        z1 = self.encoder(data, adj1, drop_edge=False)
+        z2 = self.encoder(data, adj2, drop_edge=False)
+        z3 = self.encoder(data, adj1, drop_edge=True)
+        z4 = self.encoder(data, adj2, custom_keep_prob=actual_keep_prob, drop_edge=True)
 
         z1_norm = normalize(z1, p=2, dim=1)
         z2_norm = normalize(z2, p=2, dim=1)
         z3_norm = normalize(z3, p=2, dim=1)
         z4_norm = normalize(z4, p=2, dim=1)
 
-        # ── Level 1: Same-Topology Fusion ──
-        # Fuse orig+aug within each topology → 消除增强差异
-        z_spa = self._fuse_pair(z1_norm, z3_norm)   # spatial: V1 + V3
-        z_expr = self._fuse_pair(z2_norm, z4_norm)  # expression: V2 + V4
+        z_spa = self._fuse_pair(z1_norm, z3_norm)
+        z_expr = self._fuse_pair(z2_norm, z4_norm)
 
-        # ── Projection Heads (on fused representations) ──
         h_spa = normalize(self.projectInsHead(z_spa), p=2, dim=1)
         h_expr = normalize(self.projectInsHead(z_expr), p=2, dim=1)
 
         label_spa = self.projectClsHead(z_spa)
         label_expr = self.projectClsHead(z_expr)
 
-        # ── Level 2: Cross-Topology Fusion ──
-        # Fuse spatial+expression → 融合互补信息
         z_fuse = self._fuse_pair(z_spa, z_expr)
 
-        # ── Reconstruction ──
         x_rec = self.relu(z_fuse @ self.Transform2.W.data.T) @ self.Transform1.W.data.T
 
         return h_spa, h_expr, z_fuse, label_spa, label_expr, x_rec

@@ -73,7 +73,6 @@ def batch_refine_label(adata, radius=30, key="label", suffix=None, batch_key="ba
         new_type = []
         adata_tmp = adata[adata.obs[batch_key] == bk]
         old_type = adata_tmp.obs[key].values
-        # calculate distance
         position = adata_tmp.obsm["spatial"]
         distance = cdist(position, position, metric="euclidean")
 
@@ -99,7 +98,6 @@ def refine_label(adata, radius=30, key='label', suffix=None):
     new_type = []
     old_type = adata.obs[key].values
 
-    #calculate distance
     position = adata.obsm['spatial']
     distance = cdist(position, position, metric='euclidean')
 
@@ -120,7 +118,6 @@ def refine_label(adata, radius=30, key='label', suffix=None):
     return np.array(new_type)
 
 def calculateMetrics(true, pred, embedding):
-    ## return a list of your metrics;
     metric_list = []
     metric_list.append(round(adjusted_rand_score(true, pred), 4))
     metric_list.append(round(normalized_mutual_info_score(true, pred), 4))
@@ -212,11 +209,9 @@ def searchRes(adata, fixed_clus_count, increment=0.01):
     return res
 
 
-############################### ============  MNN utils ======================== [from scDML]
 def nn(ds1, ds2, names1, names2, knn=50, metric_p=2, return_distance=False, metric="cosine", flag="in"):
-    # Find nearest neighbors of first dataset.
     if (flag == "in"):
-        nn_ = NearestNeighbors(n_neighbors=knn, metric=metric)  # remove self
+        nn_ = NearestNeighbors(n_neighbors=knn, metric=metric)
         nn_.fit(ds2)
         nn_distances, ind = nn_.kneighbors(ds1, return_distance=True)
         if not return_distance:
@@ -229,11 +224,10 @@ def nn(ds1, ds2, names1, names2, knn=50, metric_p=2, return_distance=False, metr
             match = {}
             for a, b in zip(range(ds1.shape[0]), ind):
                 for b_ind, b_i in enumerate(b[1:]):
-                    match[(names1[a], names2[b_i])] = nn_distances[a, b_ind + 1]  # not sure this is fast
-                    # match.add((names1[a], names2[b_i]))
+                    match[(names1[a], names2[b_i])] = nn_distances[a, b_ind + 1]
             return match
     else:
-        nn_ = NearestNeighbors(n_neighbors=knn, metric=metric)  # remove self
+        nn_ = NearestNeighbors(n_neighbors=knn, metric=metric)
         nn_.fit(ds2)
         nn_distances, ind = nn_.kneighbors(ds1, return_distance=True)
         if not return_distance:
@@ -246,12 +240,10 @@ def nn(ds1, ds2, names1, names2, knn=50, metric_p=2, return_distance=False, metr
             match = {}
             for a, b in zip(range(ds1.shape[0]), ind):
                 for b_ind, b_i in enumerate(b):
-                    match[(names1[a], names2[b_i])] = nn_distances[a, b_ind]  # not sure this is fast
-                    # match.add((names1[a], names2[b_i]))
+                    match[(names1[a], names2[b_i])] = nn_distances[a, b_ind]
             return match
 
 
-### - this function requires the [hnswlib] package; `import hnswlib`
 def nn_approx(ds1, ds2, names1, names2, knn=50, return_distance=False, metric="cosine", flag="in"):
     dim = ds2.shape[1]
     num_elements = ds2.shape[0]
@@ -259,65 +251,11 @@ def nn_approx(ds1, ds2, names1, names2, knn=50, return_distance=False, metric="c
         tree = hnswlib.Index(space="l2", dim=dim)
     elif (metric == "cosine"):
         tree = hnswlib.Index(space="cosine", dim=dim)
-    #square loss: 'l2' : d = sum((Ai - Bi) ^ 2)
-    #Inner  product 'ip': d = 1.0 - sum(Ai * Bi)
-    #Cosine similarity: 'cosine':d = 1.0 - sum(Ai * Bi) / sqrt(sum(Ai * Ai) * sum(Bi * Bi))
     tree.init_index(max_elements=num_elements, ef_construction=200,
-                    M=32)  # refer to https://github.com/nmslib/hnswlib/blob/master/ALGO_PARAMS.md for detail
+                    M=32)
     tree.set_ef(50)
     tree.add_items(ds2)
     ind, distances = tree.knn_query(ds1, k=knn)
-    if (flag == "in"):
-        if not return_distance:
-            match = set()
-            for a, b in zip(range(ds1.shape[0]), ind):
-                for b_i in b[1:]:  ##
-                    match.add((names1[a], names2[b_i]))
-            return match
-        else:
-            match = {}
-            for a, b in zip(range(ds1.shape[0]), ind):
-                for b_ind, b_i in enumerate(b[1:]):
-                    match[(names1[a], names2[b_i])] = distances[a, b_ind + 1]  # not sure this is fast
-                    # match.add((names1[a], names2[b_i]))
-            return match
-    else:
-        if not return_distance:
-            match = set()
-            for a, b in zip(range(ds1.shape[0]), ind):
-                for b_i in b[0:]:  ##
-                    match.add((names1[a], names2[b_i]))
-            return match
-        else:
-            match = {}
-            for a, b in zip(range(ds1.shape[0]), ind):
-                for b_ind, b_i in enumerate(b):
-                    match[(names1[a], names2[b_i])] = distances[a, b_ind]  # not sure this is fast
-                    # match.add((names1[a], names2[b_i]))
-            return match
-
-
-### - this function requires the [annoy] package; `from annoy import AnnoyIndex`
-def nn_annoy(ds1, ds2, names1, names2, knn=20, save=True, return_distance=False, metric="cosine", flag="in"):
-    """ Assumes that Y is zero-indexed. """
-    # Build index.
-    if (metric == "cosine"):
-        tree = AnnoyIndex(ds2.shape[1], metric="angular")  #metric
-        tree.set_seed(100)
-    else:
-        tree = AnnoyIndex(ds2.shape[1], metric=metric)  #metric
-        tree.set_seed(100)
-    if save:
-        tree.on_disk_build('annoy.index')
-    for i in range(ds2.shape[0]):
-        tree.add_item(i, ds2[i, :])
-    tree.build(60)  #n_trees=50
-    # Search index.
-    ind = []
-    for i in range(ds1.shape[0]):
-        ind.append(tree.get_nns_by_vector(ds1[i, :], knn, search_k=-1))  #search_k=-1 means extract search neighbors
-    ind = np.array(ind)
-    # Match.
     if (flag == "in"):
         if not return_distance:
             match = set()
@@ -326,7 +264,51 @@ def nn_annoy(ds1, ds2, names1, names2, knn=20, save=True, return_distance=False,
                     match.add((names1[a], names2[b_i]))
             return match
         else:
-            # get distance
+            match = {}
+            for a, b in zip(range(ds1.shape[0]), ind):
+                for b_ind, b_i in enumerate(b[1:]):
+                    match[(names1[a], names2[b_i])] = distances[a, b_ind + 1]
+            return match
+    else:
+        if not return_distance:
+            match = set()
+            for a, b in zip(range(ds1.shape[0]), ind):
+                for b_i in b[0:]:
+                    match.add((names1[a], names2[b_i]))
+            return match
+        else:
+            match = {}
+            for a, b in zip(range(ds1.shape[0]), ind):
+                for b_ind, b_i in enumerate(b):
+                    match[(names1[a], names2[b_i])] = distances[a, b_ind]
+            return match
+
+
+def nn_annoy(ds1, ds2, names1, names2, knn=20, save=True, return_distance=False, metric="cosine", flag="in"):
+    """ Assumes that Y is zero-indexed. """
+    if (metric == "cosine"):
+        tree = AnnoyIndex(ds2.shape[1], metric="angular")
+        tree.set_seed(100)
+    else:
+        tree = AnnoyIndex(ds2.shape[1], metric=metric)
+        tree.set_seed(100)
+    if save:
+        tree.on_disk_build('annoy.index')
+    for i in range(ds2.shape[0]):
+        tree.add_item(i, ds2[i, :])
+    tree.build(60)
+    ind = []
+    for i in range(ds1.shape[0]):
+        ind.append(tree.get_nns_by_vector(ds1[i, :], knn, search_k=-1))
+    ind = np.array(ind)
+    if (flag == "in"):
+        if not return_distance:
+            match = set()
+            for a, b in zip(range(ds1.shape[0]), ind):
+                for b_i in b[1:]:
+                    match.add((names1[a], names2[b_i]))
+            return match
+        else:
             match = {}
             for a, b in zip(range(ds1.shape[0]), ind):
                 for b_i in b[1:]:
@@ -340,7 +322,6 @@ def nn_annoy(ds1, ds2, names1, names2, knn=20, save=True, return_distance=False,
                     match.add((names1[a], names2[b_i]))
             return match
         else:
-            # get distance
             match = {}
             for a, b in zip(range(ds1.shape[0]), ind):
                 for b_i in b:
@@ -348,7 +329,6 @@ def nn_annoy(ds1, ds2, names1, names2, knn=20, save=True, return_distance=False,
             return match
 
 
-### - change ${approx}=True to use approximation algorithms -->
 def mnn(ds1,
         ds2,
         names1,
@@ -360,11 +340,9 @@ def mnn(ds1,
         return_distance=False,
         metric="cosine",
         flag="in"):
-    # Find nearest neighbors in first direction.
 
     if approx:
         if approx_method == "hnswlib":
-            #hnswlib
             match1 = nn_approx(ds1,
                                ds2,
                                names1,
@@ -372,8 +350,7 @@ def mnn(ds1,
                                knn=knn,
                                return_distance=return_distance,
                                metric=metric,
-                               flag=flag)  # save_on_disk = save_on_disk)
-            # Find nearest neighbors in second direction.
+                               flag=flag)
             match2 = nn_approx(ds2,
                                ds1,
                                names2,
@@ -381,9 +358,8 @@ def mnn(ds1,
                                knn=knn,
                                return_distance=return_distance,
                                metric=metric,
-                               flag=flag)  # , save_on_disk = save_on_disk)
+                               flag=flag)
         else:
-            #annoy
             match1 = nn_annoy(ds1,
                               ds2,
                               names1,
@@ -392,8 +368,7 @@ def mnn(ds1,
                               save=save,
                               return_distance=return_distance,
                               metric=metric,
-                              flag=flag)  # save_on_disk = save_on_disk)
-            # Find nearest neighbors in second direction.
+                              flag=flag)
             match2 = nn_annoy(ds2,
                               ds1,
                               names2,
@@ -402,19 +377,16 @@ def mnn(ds1,
                               save=save,
                               return_distance=return_distance,
                               metric=metric,
-                              flag=flag)  # , save_on_disk = save_on_disk)
+                              flag=flag)
 
     else:
         match1 = nn(ds1, ds2, names1, names2, knn=knn, return_distance=return_distance, metric=metric, flag=flag)
         match2 = nn(ds2, ds1, names2, names1, knn=knn, return_distance=return_distance, metric=metric, flag=flag)
-    # Compute mutual nearest neighbors.
     if (flag == "in"):
         if not return_distance:
-            # ${match}s are set
             mutual = match1 | set([(b, a) for a, b in match1])
             return mutual
         else:
-            # ${match}s are dict
             mutual = []
             distances = []
             for a, b in match1.keys():
@@ -425,29 +397,18 @@ def mnn(ds1,
             return mutual, distances
     else:
         if not return_distance:
-            # mutuals are set
             mutual = match1 & set([(b, a) for a, b in match2])
-            ####################################################
-            # change mnn pair to symmetric
             mutual = mutual | set([(b, a) for (a, b) in mutual])
-            ####################################################
             return mutual
         else:
-            # mutal are set
             mutual = set([(a, b) for a, b in match1.keys()]) & set([(b, a) for a, b in match2.keys()])
-            ## more_in_symm = (mutual | set([(b, a) for (a, b) in mutual])) - mutual
             mutual = list(mutual)
-            #distance list of numpy array
             distances = []
             for element_i in mutual:
                 distances.append(match1[element_i])
-            # for b, a in more_in_symm:
-            #     distances.append(match1[(a, b)])
-            # mutual += more_in_symm
             return mutual, distances
 
 
-## - calculate KNN and MNN from data_matrix(embedding matrix), not anndata
 def get_dict_mnn(data_matrix,
                  batch_index,
                  k=5,
@@ -463,7 +424,6 @@ def get_dict_mnn(data_matrix,
     data_matrix: ndarray, [m1 + m2 + m3 + m4, d];
     '''
     cell_names = np.array(range(len(data_matrix)))
-    #batch_list = adata.obs[batch_key] if batch_key in adata.obs.columns else np.ones(adata.shape[0], dtype=str)
     batch_unique = np.unique(batch_index)
     cells_batch = []
     for i in batch_unique:
@@ -472,18 +432,15 @@ def get_dict_mnn(data_matrix,
     mnns_distance = []
     if (flag == "in"):
         num_KNN = 0
-        ## print some information;
         print(f"Calculate KNN pair intra batch...........")
         print(f"number of knn: {k}")
         print(f"metric of distance is: {metric}")
         for comb in list(itertools.combinations(range(len(cells_batch)), 1)):
-            ## comb = (0,)
-            i = comb[0]  # ith batch
-            j = comb[0]  # ith batch
+            i = comb[0]
+            j = comb[0]
             print(f"Processing datasets: ({batch_unique[i]}, {batch_unique[j]})")
             target = list(cells_batch[j])
             ref = list(cells_batch[i])
-            #ds1 = adata[target].obsm[dr_name]
             ds1 = data_matrix[target]
             ds2 = data_matrix[ref]
             names1 = target
@@ -500,7 +457,6 @@ def get_dict_mnn(data_matrix,
                         metric=metric,
                         flag=flag)
             mnns = mnns | match
-            # mnns_distance.append(distances) # not need
             print(f"There are ({len(match)}) KNN pairs when processing ({batch_unique[i]}, {batch_unique[j]})")
             num_KNN += len(match)
         print(f"Total number of KNN pairs is {num_KNN}.")
@@ -514,9 +470,8 @@ def get_dict_mnn(data_matrix,
         print(f"number of knn: {k}")
         print(f"metric of distance is: {metric}")
         for comb in list(itertools.combinations(range(len(cells_batch)), 2)):
-            # comb = (2,3)
-            i = comb[0]  # i batch
-            j = comb[1]  # jth batch
+            i = comb[0]
+            j = comb[1]
             print(f"Processing datasets: ({batch_unique[i]}, {batch_unique[j]})")
             target = list(cells_batch[j])
             ref = list(cells_batch[i])
@@ -536,7 +491,6 @@ def get_dict_mnn(data_matrix,
                         metric=metric,
                         flag=flag)
             mnns = mnns | match
-            # mnns_distance.append(distances)
             print(f"There are ({len(match)}) MNN pairs when processing ({batch_unique[i]}, {batch_unique[j]})")
             num_MNN += len(match)
         print(f"Total number of KNN pairs is {num_MNN}.")
@@ -547,5 +501,4 @@ def get_dict_mnn(data_matrix,
 
 
 def convertSet2Coo(graph: list, n_spots: int):
-    ## sp.coo_matrix((data, (rows, cols)), shape=(m, n))
     return sp.coo_matrix(([1.] * len(graph[0]), (graph[0], graph[1])), shape=(n_spots, n_spots))
