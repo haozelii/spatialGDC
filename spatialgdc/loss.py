@@ -3,23 +3,6 @@ from torch import nn
 import math
 import torch.nn.functional as F
 
-class DisentangleLoss(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-    def forward(self, z1_s, z2_s, z1_p, z2_p):
-
-        # ① shared 对齐（跨视图一致）
-        loss_align = F.mse_loss(z1_s, z2_s)
-
-        # ② 正交（核心）
-        loss_orth = (
-            (z1_s * z1_p).sum(dim=1).pow(2).mean() +
-            (z2_s * z2_p).sum(dim=1).pow(2).mean()
-        )
-
-        return loss_align + 0.1 * loss_orth
-
 class ContrastiveLoss(nn.Module):
     def __init__(self, temperature=0.2) -> None:
         super().__init__()
@@ -284,67 +267,9 @@ class ClusterLoss(nn.Module):
 
         return loss + 1. * neg_entropy_loss
 
-class GraphConsis(nn.Module):
-    def __init__(self, ) -> None:
-        super().__init__()
-
-    def forward(self, emb, graphWeight):
-        dist1 = torch.cdist(emb, emb, p=2)
-        dist1 = torch.div(dist1, torch.max(dist1))
-        return torch.mean((1 - dist1) * graphWeight)
-
-
-class GraphRecLoss(nn.Module):
-    def __init__(self, norm_val, pos_weight) -> None:
-        super().__init__()
-        self.norm_val = norm_val
-        self.pos_weight = pos_weight
-
-    def forward(self, emb, target):
-        # emb = F.normalize(emb, p=2, dim=1)
-        input = emb @ emb.T
-        logits = F.binary_cross_entropy_with_logits(input,
-                                                    target,
-                                                    pos_weight=self.pos_weight)
-        return self.norm_val * logits
-
-
 class MSELoss(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
     def forward(self, x, xbar):
         return torch.square(x - xbar).mean(dim=1).mean()
-
-
-class ZINBLoss(nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-
-    def forward(self, x, mean, disp, pi=0, scale_factor=1.0, ridge_lambda=0.0):
-        '''
-        args: x, raw count, [N, hvgs]
-              scale_factor, [n,]
-        '''
-        eps = 1e-10
-        mean = (mean.T * scale_factor).T
-        if pi == 0:
-            pi = torch.tensor(0.0)
-
-        t1 = torch.lgamma(disp + eps) + torch.lgamma(x + 1.0) - torch.lgamma(
-            x + disp + eps)
-        t2 = (disp + x) * torch.log(1.0 + (mean / (disp + eps))) + (
-            x * (torch.log(disp + eps) - torch.log(mean + eps)))
-        nb_final = t1 + t2
-
-        nb_case = nb_final - torch.log(1.0 - pi + eps)
-        zero_nb = torch.pow(disp / (disp + mean + eps), disp)
-        zero_case = -torch.log(pi + ((1.0 - pi) * zero_nb) + eps)
-        result = torch.where(torch.le(x, 1e-8), zero_case, nb_case)
-
-        if ridge_lambda > 0:
-            ridge = ridge_lambda * torch.square(pi)
-            result += ridge
-
-        result = torch.mean(result)
-        return result

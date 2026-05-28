@@ -16,11 +16,11 @@ warnings.filterwarnings("ignore")
 # 0. 环境与路径配置 (直接从你的 Jupyter Cell 1 搬过来的，非常关键！)
 # =========================================================================
 os.environ["R_HOME"] = "/home/bio/miniconda3/envs/spCLUE/lib/R"
-spCLUE_ROOT_PATH = "/home/bio/lhz/spatialGDC"
-sys.path.append(spCLUE_ROOT_PATH)
+PROJECT_ROOT = "/home/bio/lhz/spatialGDC"
+sys.path.append(PROJECT_ROOT)
 
-import spCLUE
-spCLUE.fix_seed(0)
+import spatialgdc
+spatialgdc.fix_seed(0)
 
 # =========================================================================
 # 1. 定义实验基本配置
@@ -54,7 +54,7 @@ for sample_name in dlpfc_samples:
     print(f"{'='*60}")
     
     input_dir = f"../dataset/DLPFC/{sample_name}/"
-    adata = spCLUE.preprocess_data(input_dir=input_dir)
+    adata = spatialgdc.preprocess_data(input_dir=input_dir)
     
     # 过滤掉没有手动注释(Region)的细胞
     adata = adata[adata.obs.Region.notna()].copy()
@@ -62,8 +62,8 @@ for sample_name in dlpfc_samples:
     
     # PCA 与图构建
     adata.obsm["X_pca"] = PCA(n_components=200, random_state=0).fit_transform(adata.X)
-    g_spatial = spCLUE.prepare_graph(adata, "spatial")
-    g_expr = spCLUE.prepare_graph(adata, "expr")
+    g_spatial = spatialgdc.prepare_graph(adata, "spatial")
+    g_expr = spatialgdc.prepare_graph(adata, "expr")
     graph_dict = {"spatial": g_spatial, "expr": g_expr}
     
     best_ari = 0
@@ -73,18 +73,18 @@ for sample_name in dlpfc_samples:
     for i, params in enumerate(param_combinations):
         print(f"  [{sample_name} | 实验 {i+1}/{len(param_combinations)}] 参数: {params}")
         
-        test_model = spCLUE.spCLUE(adata.obsm["X_pca"], graph_dict, n_clusters)
+        test_model = spatialgdc.SpatialGDC(adata.obsm["X_pca"], graph_dict, n_clusters)
         
-        _, adata.obsm["spCLUE"] = test_model.train(
+        _, adata.obsm["spatialgdc"] = test_model.train(
             warmup_epochs=params['warmup'], 
             alpha_dcd=params['alpha'], 
             beta_rngpa=params['beta']
         )
         
-        spCLUE.clustering(
+        spatialgdc.clustering(
             adata,
             n_clusters,
-            key="spCLUE",
+            key="spatialgdc",
             refinement=True,
             cluster_methods="mclust"
         )

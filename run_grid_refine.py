@@ -9,7 +9,7 @@ os.environ["OMP_NUM_THREADS"] = "8"
 os.environ["R_HOME"] = "/home/bio/miniconda3/envs/spCLUE/lib/R"
 warnings.filterwarnings("ignore")
 sys.path.insert(0, "/home/bio/lhz/spatialGDC")
-import spCLUE
+import spatialgdc
 
 # Load current best params
 df_best = pd.read_csv("SpatialGDC_DLPFC_GridSearch_Summary.csv")
@@ -30,7 +30,7 @@ for sample_name in SAMPLES:
     print(f"{'='*50}")
 
     data_path = f"./dataset/DLPFC/{sample_name}/"
-    adata_raw = spCLUE.load_and_preprocess_st(data_path=data_path)
+    adata_raw = spatialgdc.load_and_preprocess_st(data_path=data_path)
     n_clusters = 5 if sample_name in ["151669","151670","151671","151672"] else 7
 
     if 'Region' not in adata_raw.obs.columns:
@@ -39,8 +39,8 @@ for sample_name in SAMPLES:
     if 'X_pca' not in adata_raw.obsm:
         sc.tl.pca(adata_raw, svd_solver='arpack', n_comps=200)
 
-    g_spatial = spCLUE.prepare_graph(adata_raw, "spatial")
-    g_expr = spCLUE.prepare_graph(adata_raw, "expr")
+    g_spatial = spatialgdc.prepare_graph(adata_raw, "spatial")
+    g_expr = spatialgdc.prepare_graph(adata_raw, "expr")
     graph_dict = {"spatial": g_spatial, "expr": g_expr}
     spatial_coords = adata_raw.obsm["spatial"].copy()
     spatial_coords = (spatial_coords - spatial_coords.min(axis=0)) / (
@@ -60,10 +60,10 @@ for sample_name in SAMPLES:
             if s_val == bp["sigma"] and g_val == bp["gamma"]:
                 continue  # skip already-known best
             gc.collect(); torch.cuda.empty_cache()
-            spCLUE.fix_seed(0)
+            spatialgdc.fix_seed(0)
             adata = adata_raw.copy()
-            expr_keep_prob = spCLUE.compute_spatial_keep_prob(g_expr, spatial_coords, sigma=s_val)
-            model = spCLUE.spCLUE(
+            expr_keep_prob = spatialgdc.compute_spatial_keep_prob(g_expr, spatial_coords, sigma=s_val)
+            model = spatialgdc.SpatialGDC(
                 input_data=adata.obsm["X_pca"].copy(), graph_dict=graph_dict,
                 n_clusters=n_clusters, expr_keep_prob=expr_keep_prob,
                 gamma=g_val, kappa=bp["kappa"], use_spatial_drop=True,
@@ -72,9 +72,9 @@ for sample_name in SAMPLES:
             _, features_fuse, _ = model.train()
             adata.obsm["emb"] = features_fuse
             try:
-                spCLUE.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
+                spatialgdc.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
             except:
-                spCLUE.clustering(adata, n_clusters, key="emb", refinement=False, cluster_methods="mclust")
+                spatialgdc.clustering(adata, n_clusters, key="emb", refinement=False, cluster_methods="mclust")
             cc = 'mclust_refined' if 'mclust_refined' in adata.obs.columns else 'mclust'
             ae = adata[adata.obs.Region.notna()].copy()
             ari = adjusted_rand_score(ae.obs["Region"], ae.obs[cc])
@@ -93,10 +93,10 @@ for sample_name in SAMPLES:
 
     for k_val in kappas:
         gc.collect(); torch.cuda.empty_cache()
-        spCLUE.fix_seed(0)
+        spatialgdc.fix_seed(0)
         adata = adata_raw.copy()
-        expr_keep_prob = spCLUE.compute_spatial_keep_prob(g_expr, spatial_coords, sigma=best_sigma)
-        model = spCLUE.spCLUE(
+        expr_keep_prob = spatialgdc.compute_spatial_keep_prob(g_expr, spatial_coords, sigma=best_sigma)
+        model = spatialgdc.SpatialGDC(
             input_data=adata.obsm["X_pca"].copy(), graph_dict=graph_dict,
             n_clusters=n_clusters, expr_keep_prob=expr_keep_prob,
             gamma=best_gamma, kappa=k_val, use_spatial_drop=True,
@@ -105,9 +105,9 @@ for sample_name in SAMPLES:
         _, features_fuse, _ = model.train()
         adata.obsm["emb"] = features_fuse
         try:
-            spCLUE.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
+            spatialgdc.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
         except:
-            spCLUE.clustering(adata, n_clusters, key="emb", refinement=False, cluster_methods="mclust")
+            spatialgdc.clustering(adata, n_clusters, key="emb", refinement=False, cluster_methods="mclust")
         cc = 'mclust_refined' if 'mclust_refined' in adata.obs.columns else 'mclust'
         ae = adata[adata.obs.Region.notna()].copy()
         ari = adjusted_rand_score(ae.obs["Region"], ae.obs[cc])

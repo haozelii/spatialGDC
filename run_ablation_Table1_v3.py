@@ -24,10 +24,10 @@ os.environ["OPENBLAS_NUM_THREADS"] = "4"
 os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 os.environ["R_HOME"] = "/home/bio/miniconda3/envs/spCLUE/lib/R"
 
-spCLUE_ROOT_PATH = "/home/bio/lhz/spatialGDC"
-if spCLUE_ROOT_PATH not in sys.path:
-    sys.path.append(spCLUE_ROOT_PATH)
-import spCLUE
+PROJECT_ROOT = "/home/bio/lhz/spatialGDC"
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+import spatialgdc
 
 warnings.filterwarnings("ignore")
 
@@ -77,9 +77,9 @@ os.makedirs("results/Ablation", exist_ok=True)
 # ==========================================
 def load_and_prepare_dlpfc(sample_name):
     """加载DLPFC数据，返回共享的 adata + 图 + keep_prob"""
-    spCLUE.fix_seed(0)  # 数据加载前 seed，保证 PCA 一致性
+    spatialgdc.fix_seed(0)  # 数据加载前 seed，保证 PCA 一致性
     data_path = os.path.join(DLPFC_DIR, sample_name)
-    adata = spCLUE.load_and_preprocess_st(data_path=data_path)
+    adata = spatialgdc.load_and_preprocess_st(data_path=data_path)
     df_meta = pd.read_csv(os.path.join(data_path, 'metadata.tsv'), sep='\t', index_col=0)
     adata.obs['Region'] = df_meta.loc[adata.obs_names, 'layer_guess']
     adata = adata[adata.obs['Region'].notna()].copy()
@@ -90,7 +90,7 @@ def load_and_prepare_dlpfc(sample_name):
 
 def load_and_prepare_brca(sample_name):
     """加载BRCA数据"""
-    spCLUE.fix_seed(0)
+    spatialgdc.fix_seed(0)
     brca_dir_specific = os.path.join(BRCA_DIR, sample_name)
     adata = sc.read_visium(brca_dir_specific)
     adata.var_names_make_unique()
@@ -128,21 +128,21 @@ def run_ablation_on_sample(dataset_type, sample_name, best_params):
         n_clusters = adata_base.obs['Region'].dropna().nunique()
 
     # 构建图 (只构建一次)
-    g_spatial = spCLUE.prepare_graph(adata_base, "spatial")
-    g_expr = spCLUE.prepare_graph(adata_base, "expr")
+    g_spatial = spatialgdc.prepare_graph(adata_base, "spatial")
+    g_expr = spatialgdc.prepare_graph(adata_base, "expr")
     spatial_coords = adata_base.obsm["spatial"].copy()
     spatial_coords_norm = (spatial_coords - spatial_coords.min(axis=0)) / (spatial_coords.max(axis=0) - spatial_coords.min(axis=0))
 
     sigma = best_params["sigma"]
     gamma = best_params["gamma"]
     kappa = best_params["kappa"]
-    base_keep_prob = spCLUE.compute_spatial_keep_prob(g_expr, spatial_coords_norm, sigma=sigma)
+    base_keep_prob = spatialgdc.compute_spatial_keep_prob(g_expr, spatial_coords_norm, sigma=sigma)
 
     results = {}
 
     for mode in ablation_modes:
         # 每个变体重置 seed，保证训练过程一致
-        spCLUE.fix_seed(0)
+        spatialgdc.fix_seed(0)
 
         # 从同一份 base adata 拷贝
         adata = adata_base.copy()
@@ -165,7 +165,7 @@ def run_ablation_on_sample(dataset_type, sample_name, best_params):
 
         # 训练
         try:
-            model = spCLUE.spCLUE(
+            model = spatialgdc.SpatialGDC(
                 input_data=adata.obsm["X_pca"],
                 graph_dict=graph_dict,
                 n_clusters=n_clusters,
@@ -174,10 +174,10 @@ def run_ablation_on_sample(dataset_type, sample_name, best_params):
                 gamma=current_gamma,
                 kappa=current_kappa,
             )
-            _, adata.obsm["spCLUE_emb"], _ = model.train()
+            _, adata.obsm["spatialgdc_emb"], _ = model.train()
 
             # 聚类精修
-            spCLUE.clustering(adata, n_clusters, key="spCLUE_emb", refinement=True, cluster_methods="mclust")
+            spatialgdc.clustering(adata, n_clusters, key="spatialgdc_emb", refinement=True, cluster_methods="mclust")
             cluster_col = 'mclust_refined' if 'mclust_refined' in adata.obs.columns else 'mclust'
 
             ari = adjusted_rand_score(adata.obs["Region"], adata.obs[cluster_col])
@@ -248,7 +248,7 @@ print("=" * 60)
 print(df_table1.to_string(index=False))
 print("=" * 60)
 
-df_table1.to_csv("results/Ablation/Table1_Ablation_spCLUE.csv", index=False)
+df_table1.to_csv("results/Ablation/Table1_Ablation_spatialgdc.csv", index=False)
 
 # 详细 per-sample 表
 print("\nPer-sample detail:")

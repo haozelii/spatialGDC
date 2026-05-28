@@ -19,10 +19,10 @@ os.environ["R_HOME"] = "/home/bio/miniconda3/envs/spCLUE/lib/R"
 warnings.filterwarnings("ignore")
 
 # 2. 导入核心包
-spCLUE_ROOT_PATH = "/home/bio/lhz/spatialGDC"
-if spCLUE_ROOT_PATH not in sys.path:
-    sys.path.append(spCLUE_ROOT_PATH)
-import spCLUE
+PROJECT_ROOT = "/home/bio/lhz/spatialGDC"
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+import spatialgdc
 
 # ======================================================
 # 🌟 3. 定义超参数搜索网格
@@ -53,15 +53,15 @@ for sample_name in samples_list:
 
     # 加载基础数据
     data_path = f"./dataset/DLPFC/{sample_name}/"
-    adata_raw = spCLUE.load_and_preprocess_st(data_path=data_path)
+    adata_raw = spatialgdc.load_and_preprocess_st(data_path=data_path)
     n_clusters = 5 if sample_name in ["151669", "151670", "151671", "151672"] else 7
     
     if 'Region' not in adata_raw.obs.columns:
         df_meta = pd.read_csv(os.path.join(data_path, 'metadata.tsv'), sep='\t', index_col=0)
         adata_raw.obs['Region'] = df_meta.loc[adata_raw.obs_names, 'layer_guess']
     
-    g_spatia = spCLUE.prepare_graph(adata_raw, "spatial")
-    g_expr = spCLUE.prepare_graph(adata_raw, "expr")
+    g_spatia = spatialgdc.prepare_graph(adata_raw, "spatial")
+    g_expr = spatialgdc.prepare_graph(adata_raw, "expr")
     graph_dict = {"spatial": g_spatia, "expr": g_expr}
     spatial_coords_raw = adata_raw.obsm["spatial"].copy()
     spatial_coords_norm = (spatial_coords_raw - spatial_coords_raw.min(axis=0)) / (spatial_coords_raw.max(axis=0) - spatial_coords_raw.min(axis=0))
@@ -76,14 +76,14 @@ for sample_name in samples_list:
                     gc.collect()
                     if torch.cuda.is_available(): torch.cuda.empty_cache()
                     
-                    spCLUE.fix_seed(0)
+                    spatialgdc.fix_seed(0)
                     adata = adata_raw.copy()
                     
                     # 重新计算保留概率
-                    expr_keep_prob = spCLUE.compute_spatial_keep_prob(g_expr, spatial_coords_norm, sigma=s)
+                    expr_keep_prob = spatialgdc.compute_spatial_keep_prob(g_expr, spatial_coords_norm, sigma=s)
                     
                     # 实例化 (参数传给 __init__)
-                    model = spCLUE.spCLUE(
+                    model = spatialgdc.SpatialGDC(
                         input_data=adata.obsm["X_pca"].copy(),
                         graph_dict=graph_dict,
                         n_clusters=n_clusters,
@@ -96,7 +96,7 @@ for sample_name in samples_list:
                     _, adata.obsm["emb"], _ = model.train()
                     
                     # 聚类精修
-                    spCLUE.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
+                    spatialgdc.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
                     cluster_col = 'mclust_refined' if 'mclust_refined' in adata.obs.columns else 'mclust'
                     
                     # 计算得分

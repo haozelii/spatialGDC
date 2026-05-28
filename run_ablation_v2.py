@@ -13,9 +13,9 @@ os.environ["OMP_NUM_THREADS"] = "8"
 os.environ["R_HOME"] = "/home/bio/miniconda3/envs/spCLUE/lib/R"
 warnings.filterwarnings("ignore")
 
-spCLUE_ROOT_PATH = "/home/bio/lhz/spatialGDC"
-sys.path.insert(0, spCLUE_ROOT_PATH)
-import spCLUE
+PROJECT_ROOT = "/home/bio/lhz/spatialGDC"
+sys.path.insert(0, PROJECT_ROOT)
+import spatialgdc
 
 # Load best params from grid search
 df_best = pd.read_csv("SpatialGDC_DLPFC_GridSearch_Summary.csv")
@@ -41,7 +41,7 @@ for sample_name in samples_list:
     
     # Load data once per slice
     data_path = f"./dataset/DLPFC/{sample_name}/"
-    adata_raw = spCLUE.load_and_preprocess_st(data_path=data_path)
+    adata_raw = spatialgdc.load_and_preprocess_st(data_path=data_path)
     n_clusters = 5 if sample_name in ["151669", "151670", "151671", "151672"] else 7
     
     if 'Region' not in adata_raw.obs.columns:
@@ -51,8 +51,8 @@ for sample_name in samples_list:
     if 'X_pca' not in adata_raw.obsm:
         sc.tl.pca(adata_raw, svd_solver='arpack', n_comps=200)
     
-    g_spatial = spCLUE.prepare_graph(adata_raw, "spatial")
-    g_expr = spCLUE.prepare_graph(adata_raw, "expr")
+    g_spatial = spatialgdc.prepare_graph(adata_raw, "spatial")
+    g_expr = spatialgdc.prepare_graph(adata_raw, "expr")
     graph_dict = {"spatial": g_spatial, "expr": g_expr}
     
     spatial_coords = adata_raw.obsm["spatial"].copy()
@@ -77,12 +77,12 @@ for sample_name in samples_list:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             
-            spCLUE.fix_seed(seed)
+            spatialgdc.fix_seed(seed)
             adata = adata_raw.copy()
             
-            expr_keep_prob = spCLUE.compute_spatial_keep_prob(g_expr, spatial_coords, sigma=s)
+            expr_keep_prob = spatialgdc.compute_spatial_keep_prob(g_expr, spatial_coords, sigma=s)
             
-            model = spCLUE.spCLUE(
+            model = spatialgdc.SpatialGDC(
                 input_data=adata.obsm["X_pca"].copy(),
                 graph_dict=graph_dict,
                 n_clusters=n_clusters,
@@ -96,10 +96,10 @@ for sample_name in samples_list:
             adata.obsm["emb"] = features_fuse
             
             try:
-                spCLUE.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
+                spatialgdc.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
             except Exception as e:
                 print(f"  mclust refinement failed ({e}), trying without...")
-                spCLUE.clustering(adata, n_clusters, key="emb", refinement=False, cluster_methods="mclust")
+                spatialgdc.clustering(adata, n_clusters, key="emb", refinement=False, cluster_methods="mclust")
             
             cluster_col = 'mclust_refined' if 'mclust_refined' in adata.obs.columns else 'mclust'
             adata_eval = adata[adata.obs.Region.notna()].copy()

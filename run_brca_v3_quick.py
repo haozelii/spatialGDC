@@ -9,7 +9,7 @@ os.environ["OMP_NUM_THREADS"] = "8"
 os.environ["R_HOME"] = "/home/bio/miniconda3/envs/spCLUE/lib/R"
 warnings.filterwarnings("ignore")
 sys.path.insert(0, "/home/bio/lhz/spatialGDC")
-import spCLUE
+import spatialgdc
 
 # V3 best params
 SIGMA, GAMMA, KAPPA, BETA = 0.6, 5.0, 0.05, 2.0
@@ -36,13 +36,13 @@ pca = PCA(n_components=200, random_state=SEED)
 adata.obsm["X_pca"] = pca.fit_transform(adata.X.toarray() if hasattr(adata.X, 'toarray') else adata.X)
 
 # Build graphs
-g_spatial = spCLUE.prepare_graph(adata, "spatial")
-g_expr = spCLUE.prepare_graph(adata, "expr")
+g_spatial = spatialgdc.prepare_graph(adata, "spatial")
+g_expr = spatialgdc.prepare_graph(adata, "expr")
 graph_dict = {"spatial": g_spatial, "expr": g_expr}
 
 spatial_coords = adata.obsm["spatial"].copy()
 spatial_coords = (spatial_coords - spatial_coords.min(axis=0)) / (spatial_coords.max(axis=0) - spatial_coords.min(axis=0))
-expr_keep_prob = spCLUE.compute_spatial_keep_prob(g_expr, spatial_coords, sigma=SIGMA)
+expr_keep_prob = spatialgdc.compute_spatial_keep_prob(g_expr, spatial_coords, sigma=SIGMA)
 
 # Load ground truth
 meta = pd.read_csv("./dataset/BRCA1/metadata.tsv", sep='\t', index_col=0)
@@ -51,8 +51,8 @@ gt_col = 'fine_annot_type'
 n_clusters = meta[gt_col].nunique()
 print(f"n_clusters = {n_clusters}")
 
-spCLUE.fix_seed(SEED)
-model = spCLUE.spCLUE(
+spatialgdc.fix_seed(SEED)
+model = spatialgdc.SpatialGDC(
     input_data=adata.obsm["X_pca"].copy(),
     graph_dict=graph_dict, n_clusters=n_clusters,
     expr_keep_prob=expr_keep_prob,
@@ -67,9 +67,9 @@ adata.obsm["emb"] = features_fuse
 
 # mclust refinement
 try:
-    spCLUE.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
+    spatialgdc.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
 except:
-    spCLUE.clustering(adata, n_clusters, key="emb", refinement=False, cluster_methods="mclust")
+    spatialgdc.clustering(adata, n_clusters, key="emb", refinement=False, cluster_methods="mclust")
 
 cluster_col = 'mclust_refined' if 'mclust_refined' in adata.obs.columns else 'mclust'
 adata.obs['domain'] = adata.obs[cluster_col].astype('category')

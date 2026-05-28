@@ -10,10 +10,10 @@ import torch
 from sklearn.metrics import adjusted_rand_score
 import argparse
 
-spCLUE_ROOT_PATH = "/home/bio/lhz/spatialGDC"
-if spCLUE_ROOT_PATH not in sys.path:
-    sys.path.append(spCLUE_ROOT_PATH)
-import spCLUE
+PROJECT_ROOT = "/home/bio/lhz/spatialGDC"
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+import spatialgdc
 
 warnings.filterwarnings("ignore")
 
@@ -48,7 +48,7 @@ def run_ablation_on_sample(dataset_type, sample_name, base_dir):
     
     # --- A. 数据加载与对齐 ---
     data_path = os.path.join(base_dir, sample_name)
-    adata = spCLUE.load_and_preprocess_st(data_path=data_path)
+    adata = spatialgdc.load_and_preprocess_st(data_path=data_path)
     
     if dataset_type == 'DLPFC':
         df_meta = pd.read_csv(os.path.join(data_path, 'metadata.tsv'), sep='\t', index_col=0)
@@ -80,19 +80,19 @@ def run_ablation_on_sample(dataset_type, sample_name, base_dir):
     if sp.issparse(adata.X): adata.X = adata.X.toarray()
     
     # --- B. 构建基础图 ---
-    g_spatia = spCLUE.prepare_graph(adata, "spatial")
-    g_expr = spCLUE.prepare_graph(adata, "expr")
+    g_spatia = spatialgdc.prepare_graph(adata, "spatial")
+    g_expr = spatialgdc.prepare_graph(adata, "expr")
     
     spatial_coords = adata.obsm["spatial"].copy()
     spatial_coords = (spatial_coords - spatial_coords.min(axis=0)) / (spatial_coords.max(axis=0) - spatial_coords.min(axis=0))
-    base_keep_prob = spCLUE.compute_spatial_keep_prob(g_expr, spatial_coords, sigma=0.5)
+    base_keep_prob = spatialgdc.compute_spatial_keep_prob(g_expr, spatial_coords, sigma=0.5)
     
     res_dict = {}
 
     # --- C. 遍历运行 4 个变体 ---
     for mode in ablation_modes:
         print(f"  🧪 运行变体: 【{mode}】")
-        spCLUE.fix_seed(0) 
+        spatialgdc.fix_seed(0) 
         
         # 默认满血参数
         current_keep_prob = base_keep_prob
@@ -109,24 +109,24 @@ def run_ablation_on_sample(dataset_type, sample_name, base_dir):
             current_keep_prob = None # 退化为全局均匀随机丢边
 
         # 训练
-        spCLUE_model = spCLUE.spCLUE(
+        sgdc_model = spatialgdc.SpatialGDC(
             input_data=adata.obsm["X_pca"], 
             graph_dict=graph_dict, 
             n_clusters=n_clusters,
             expr_keep_prob=current_keep_prob,
             use_instance_cl=use_instance_cl
         )
-        _, adata.obsm["spCLUE_emb"], _ = spCLUE_model.train()
+        _, adata.obsm["spatialgdc_emb"], _ = sgdc_model.train()
         
         # 聚类精修
-        spCLUE.clustering(adata, n_clusters, key="spCLUE_emb", refinement=True, cluster_methods="mclust")
+        spatialgdc.clustering(adata, n_clusters, key="spatialgdc_emb", refinement=True, cluster_methods="mclust")
         cluster_col = 'mclust_refined' if 'mclust_refined' in adata.obs.columns else 'mclust'
         
         ari = adjusted_rand_score(adata.obs["Region"], adata.obs[cluster_col])
         print(f"    🏆 ARI = {ari:.4f}")
         res_dict[mode] = ari
         
-        del spCLUE_model
+        del sgdc_model
         gc.collect()
         if torch.cuda.is_available(): torch.cuda.empty_cache()
 
@@ -165,10 +165,10 @@ for mode in ablation_modes:
 df_table1 = pd.DataFrame(final_table)
 
 print("\n" + "=" * 50)
-print("Table 1: Performance comparison of spCLUE and its ablated variants")
+print("Table 1: Performance comparison of SpatialGDC and its ablated variants")
 print("=" * 50)
 print(df_table1.to_string(index=False))
 print("=" * 50)
 
-df_table1.to_csv("results/Ablation/Table1_Ablation_spCLUE.csv", index=False)
-print("✅ 表格已保存至: results/Ablation/Table1_Ablation_spCLUE.csv")
+df_table1.to_csv("results/Ablation/Table1_Ablation_spatialgdc.csv", index=False)
+print("✅ 表格已保存至: results/Ablation/Table1_Ablation_spatialgdc.csv")

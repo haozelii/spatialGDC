@@ -17,10 +17,10 @@ os.environ["R_HOME"] = "/home/bio/miniconda3/envs/spCLUE/lib/R"
 warnings.filterwarnings("ignore")
 
 # 2. 导入核心包
-spCLUE_ROOT_PATH = "/home/bio/lhz/spatialGDC"
-if spCLUE_ROOT_PATH not in sys.path:
-    sys.path.append(spCLUE_ROOT_PATH)
-import spCLUE
+PROJECT_ROOT = "/home/bio/lhz/spatialGDC"
+if PROJECT_ROOT not in sys.path:
+    sys.path.append(PROJECT_ROOT)
+import spatialgdc
 
 # ======================================================
 # 3. 超参数搜索网格 (针对 MOSTA 小鼠胚胎数据集优化)
@@ -66,8 +66,8 @@ from sklearn.decomposition import PCA
 adata_raw.obsm["X_pca"] = PCA(n_components=200, random_state=0).fit_transform(adata_raw.X)
 
 # 构建图
-g_spatial = spCLUE.prepare_graph(adata_raw, "spatial")
-g_expr = spCLUE.prepare_graph(adata_raw, "expr")
+g_spatial = spatialgdc.prepare_graph(adata_raw, "spatial")
+g_expr = spatialgdc.prepare_graph(adata_raw, "expr")
 graph_dict = {"spatial": g_spatial, "expr": g_expr}
 spatial_coords_raw = adata_raw.obsm["spatial"].copy()
 spatial_coords_norm = (spatial_coords_raw - spatial_coords_raw.min(axis=0)) / (spatial_coords_raw.max(axis=0) - spatial_coords_raw.min(axis=0))
@@ -94,12 +94,12 @@ for s in param_grid['sigma']:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 
-                spCLUE.fix_seed(0)
+                spatialgdc.fix_seed(0)
                 adata = adata_raw.copy()
                 
-                expr_keep_prob = spCLUE.compute_spatial_keep_prob(g_expr, spatial_coords_norm, sigma=s)
+                expr_keep_prob = spatialgdc.compute_spatial_keep_prob(g_expr, spatial_coords_norm, sigma=s)
                 
-                model = spCLUE.spCLUE(
+                model = spatialgdc.SpatialGDC(
                     input_data=adata.obsm["X_pca"].copy(),
                     graph_dict=graph_dict,
                     n_clusters=n_clusters,
@@ -110,7 +110,7 @@ for s in param_grid['sigma']:
                 
                 _, adata.obsm["emb"], _ = model.train()
                 
-                spCLUE.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
+                spatialgdc.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
                 cluster_col = 'mclust_refined' if 'mclust_refined' in adata.obs.columns else 'mclust'
                 
                 # 计算 ARI (使用原始数字标签 vs 预测)

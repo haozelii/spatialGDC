@@ -10,7 +10,7 @@ os.environ["OMP_NUM_THREADS"] = "8"
 os.environ["R_HOME"] = "/home/bio/miniconda3/envs/spCLUE/lib/R"
 warnings.filterwarnings("ignore")
 sys.path.insert(0, "/home/bio/lhz/spatialGDC")
-import spCLUE
+import spatialgdc
 
 brca_dir = "./dataset/BRCA1/V1_Human_Breast_Cancer_Block_A_Section_1"
 adata_raw = sc.read_visium(brca_dir)
@@ -27,8 +27,8 @@ adata_raw.obs['Region'] = meta.loc[adata_raw.obs_names, 'fine_annot_type']
 n_clusters = adata_raw.obs['Region'].nunique()
 print(f"BRCA: {adata_raw.shape[0]} spots, {n_clusters} clusters")
 
-gs = spCLUE.prepare_graph(adata_raw, "spatial")
-ge = spCLUE.prepare_graph(adata_raw, "expr")
+gs = spatialgdc.prepare_graph(adata_raw, "spatial")
+ge = spatialgdc.prepare_graph(adata_raw, "expr")
 gd = {"spatial": gs, "expr": ge}
 sc_ = adata_raw.obsm["spatial"].copy()
 sc_ = (sc_ - sc_.min(axis=0)) / (sc_.max(axis=0) - sc_.min(axis=0))
@@ -47,10 +47,10 @@ for variant, use_sp, use_intcl in [
     for seed in SEEDS:
         gc.collect()
         if torch.cuda.is_available(): torch.cuda.empty_cache()
-        spCLUE.fix_seed(seed)
+        spatialgdc.fix_seed(seed)
         adata = adata_raw.copy()
-        ekp = spCLUE.compute_spatial_keep_prob(ge, sc_, sigma=BEST["sigma"])
-        m = spCLUE.spCLUE(
+        ekp = spatialgdc.compute_spatial_keep_prob(ge, sc_, sigma=BEST["sigma"])
+        m = spatialgdc.SpatialGDC(
             input_data=adata.obsm["X_pca"].copy(), graph_dict=gd,
             n_clusters=n_clusters, expr_keep_prob=ekp,
             gamma=BEST["gamma"], kappa=BEST["kappa"], beta=BEST["beta"],
@@ -58,7 +58,7 @@ for variant, use_sp, use_intcl in [
         )
         _, emb, _ = m.train()
         adata.obsm["emb"] = emb
-        spCLUE.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
+        spatialgdc.clustering(adata, n_clusters, key="emb", refinement=True, cluster_methods="mclust")
         cc = 'mclust_refined' if 'mclust_refined' in adata.obs.columns else 'mclust'
         ae = adata[adata.obs.Region.notna()]
         ari = adjusted_rand_score(ae.obs["Region"], ae.obs[cc])
